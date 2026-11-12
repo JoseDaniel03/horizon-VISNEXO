@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import subprocess
+import sys
 import stat
 import tarfile
 import tempfile
@@ -72,12 +74,18 @@ def stage_game(source: Path, commit: str, destination: Path) -> Path:
         origin, destination / EXPORTERS, symlinks=False,
         ignore=shutil.ignore_patterns("*.class", "*.jar", "*.zip", "*.log", "__pycache__")
     )
+    if os.name == "nt":
+        # Same pinned and checksummed DX12 shader compiler used by upstream.
+        # Required by some Windows integrated GPUs; include its licence.
+        subprocess.run([sys.executable, str(source / "tools/ci/fetch_dxc.py"), str(destination)],
+                       check=True, cwd=source)
     hashes = {
         path.relative_to(destination).as_posix(): sha256(path)
         for path in destination.rglob("*") if path.is_file()
     }
     meta = {
         "format": 1, "source_repo": FORK_SOURCE,
+        "game_binary": "horizon-official",
         "upstream_repo": "https://github.com/horizon-rust/horizon.git",
         "source_commit": commit, "source_ref": "main",
         "platform": platform_id(), "sha256": hashes,
