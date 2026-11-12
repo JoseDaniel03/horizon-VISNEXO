@@ -1,0 +1,116 @@
+name: VIS Nexo - Portable Horizon Game
+
+# Build the GAME from our fork; no Horizon Launcher, Mojang assets, or shared
+# credentials. Automatic only when this VIS packaging workflow itself changes.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/vis-nexo-portable.yml'
+
+permissions:
+  contents: read
+concurrency:
+  group: vis-nexo-portable-${D}{{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  game:
+    name: Native game - ${D}{{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-24.04
+          - name: windows-x64
+            runner: windows-2022
+    runs-on: ${D}{{ matrix.runner }}
+    timeout-minutes: 180
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux native client dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxkbcommon-dev libwayland-dev
+      - name: Compile client and resource preparer only
+        shell: bash
+        run: |
+          cargo build --locked --release -p horizon-client --bin horizon-client -p horizon-prepare --bin horizon-prepare
+      - name: Verify native launcher protocol
+        shell: bash
+        run: |
+          if [[ "${D}{{ runner.os }}" == "Windows" ]]; then
+            ./target/release/horizon-client.exe --launch-api > client-api.json
+            ./target/release/horizon-prepare.exe --launch-api > preparer-api.json
+          else
+            ./target/release/horizon-client --launch-api > client-api.json
+            ./target/release/horizon-prepare --launch-api > preparer-api.json
+          fi
+          python3 -c "import json; c=json.load(open('client-api.json'));p=json.load(open('preparer-api.json')); assert c.get('minecraft')==p.get('minecraft')=='26.3'; assert c.get('launch_api')==p.get('launch_api');print('Horizon Launch API verified:',c['launch_api'])"
+      - name: Package portable game for VIS Nexo
+        shell: bash
+        run: python3 tools/vis_nexo_portable.py --commit "${D}{{ github.sha }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vis-game-${D}{{ matrix.name }}
+          path: dist/vis-game/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish portable game for VIS Nexo
+    needs: game
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vis-game-*
+          merge-multiple: true
+          path: out
+      - name: Verify both native archives and checksums
+        shell: bash
+        run: |
+          cd out
+          sha256sum --check vis-horizon-linux-x86_64.tar.gz.sha256
+          sha256sum --check vis-horizon-windows-x64.zip.sha256
+          cat *.sha256 > SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 2
+      - name: Publish immutable source-commit release
+        env:
+          GH_TOKEN: ${D}{{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="visgame-${D}{GITHUB_SHA:0:12}"
+          printf 'VIS Horizon game source commit: %s\nMinecraft assets: not included.\nHorizon Launcher: not included.\nRequires the player to own Minecraft Java Edition 26.3.\n' "$GITHUB_SHA" > out/RELEASE-NOTES.txt
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists and will not be overwritten"
+            exit 0
+          fi
+          gh release create "$TAG" \
+            out/vis-horizon-linux-x86_64.tar.gz \
+            out/vis-horizon-windows-x64.zip \
+            out/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "VIS Horizon 26.3 · ${D}{GITHUB_SHA:0:12}" \
+            --notes-file out/RELEASE-NOTES.txt \
+            --latest
