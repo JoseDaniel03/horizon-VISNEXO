@@ -1,13 +1,47 @@
 name: VIS Nexo - Portable Horizon Game
 
 # Build the GAME from our fork; no Horizon Launcher, Mojang assets, or shared
-# credentials. Automatic only when this VIS packaging workflow itself changes.
+# credentials. Source changes must rebuild the release, not only workflow edits.
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - '.github/workflows/vis-nexo-portable.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain*'
+      - 'crates/**'
+      - 'game/**'
+      - 'mods/horizon/**'
+      - 'third_party/**'
+      - 'xtask/**'
+      - 'tools/vis_nexo_portable.py'
+      - 'tools/verify_vis_nexo_archive.py'
+      - 'tools/ci/**'
+      - 'packaging/windows/**'
+      - 'research-lock.json'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/vis-nexo-portable.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain*'
+      - 'crates/**'
+      - 'game/**'
+      - 'mods/horizon/**'
+      - 'third_party/**'
+      - 'xtask/**'
+      - 'tools/vis_nexo_portable.py'
+      - 'tools/verify_vis_nexo_archive.py'
+      - 'tools/ci/**'
+      - 'packaging/windows/**'
+      - 'research-lock.json'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
 
 permissions:
   contents: read
@@ -72,6 +106,15 @@ jobs:
       - name: Package portable game for VIS Nexo
         shell: bash
         run: python3 tools/vis_nexo_portable.py --commit "${{ github.sha }}"
+      - name: Validate portable archive contents and binary fingerprints
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            ARCHIVE="dist/vis-game/vis-horizon-windows-x64.zip"
+          else
+            ARCHIVE="dist/vis-game/vis-horizon-linux-x86_64.tar.gz"
+          fi
+          python3 tools/verify_vis_nexo_archive.py --archive "$ARCHIVE" --platform "${{ matrix.name }}" --commit "${{ github.sha }}"
       - uses: actions/upload-artifact@v4
         with:
           name: vis-game-${{ matrix.name }}
