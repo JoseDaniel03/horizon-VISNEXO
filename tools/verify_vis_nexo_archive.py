@@ -29,7 +29,7 @@ def checked_name(name: str) -> str:
     if not name.startswith(ROOT) or "\\" in name or "\x00" in name:
         raise ValueError(f"Invalid archive prefix/path: {name!r}")
     parts = PurePosixPath(name).parts
-    if any(part in (".", "..") for part in name.split("/")) or name.endswith("/"):
+    if any(part in ("", ".", "..") or ":" in part for part in name.split("/")):
         raise ValueError(f"Unsafe archive entry: {name!r}")
     if len(parts) < 2 or parts[0] != "vis-horizon":
         raise ValueError(f"Unexpected archive layout: {name!r}")
@@ -124,6 +124,17 @@ def validate(archive: Path, commit: str, platform: str) -> int:
         missing = required - set(found)
         if missing:
             raise ValueError(f"Required components missing: {sorted(missing)}")
+        # Restrict releases to explicitly required runtime files and open Java
+        # source exporters. No client.jar, game assets, worlds or unrelated blobs.
+        exporter = "mods/horizon/src/test/java/dev/horizonlab/parity/"
+        unexpected = [
+            entry for entry in found
+            if entry not in required and not (
+                entry.startswith(exporter) and entry.endswith(".java")
+            )
+        ]
+        if unexpected:
+            raise ValueError(f"Unexpected files in game distribution: {unexpected[:5]}")
 
         for relative, entry in found.items():
             expected = hashes[relative]
