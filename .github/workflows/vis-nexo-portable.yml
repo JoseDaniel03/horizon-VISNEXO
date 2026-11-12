@@ -47,10 +47,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev pkg-config libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxkbcommon-dev libwayland-dev
-      - name: Compile client and resource preparer only
+      - name: Compile official Horizon game and resource preparer only
         shell: bash
         run: |
-          cargo build --locked --release -p horizon-client --bin horizon-client -p horizon-prepare --bin horizon-prepare
+          # The playable game is horizon-official. The low-level
+          # horizon-client crate alone is not the public release game.
+          cargo build --locked --release -p horizon-official --bin horizon-official -p horizon-prepare --bin horizon-prepare
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp target/release/horizon-official.exe target/release/horizon-client.exe
+          else
+            cp target/release/horizon-official target/release/horizon-client
+          fi
       - name: Verify native launcher protocol
         shell: bash
         run: |
