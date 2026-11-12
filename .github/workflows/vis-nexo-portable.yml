@@ -12,12 +12,12 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: vis-nexo-portable-${D}{{ github.ref }}
+  group: vis-nexo-portable-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   game:
-    name: Native game - ${D}{{ matrix.name }}
+    name: Native game - ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +26,7 @@ jobs:
             runner: ubuntu-24.04
           - name: windows-x64
             runner: windows-2022
-    runs-on: ${D}{{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
       CARGO_BUILD_JOBS: '2'
@@ -54,7 +54,7 @@ jobs:
       - name: Verify native launcher protocol
         shell: bash
         run: |
-          if [[ "${D}{{ runner.os }}" == "Windows" ]]; then
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
             ./target/release/horizon-client.exe --launch-api > client-api.json
             ./target/release/horizon-prepare.exe --launch-api > preparer-api.json
           else
@@ -64,10 +64,10 @@ jobs:
           python3 -c "import json; c=json.load(open('client-api.json'));p=json.load(open('preparer-api.json')); assert c.get('minecraft')==p.get('minecraft')=='26.3'; assert c.get('launch_api')==p.get('launch_api');print('Horizon Launch API verified:',c['launch_api'])"
       - name: Package portable game for VIS Nexo
         shell: bash
-        run: python3 tools/vis_nexo_portable.py --commit "${D}{{ github.sha }}"
+        run: python3 tools/vis_nexo_portable.py --commit "${{ github.sha }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: vis-game-${D}{{ matrix.name }}
+          name: vis-game-${{ matrix.name }}
           path: dist/vis-game/*
           if-no-files-found: error
           retention-days: 30
@@ -95,11 +95,11 @@ jobs:
           test "$(wc -l < SHA256SUMS)" -eq 2
       - name: Publish immutable source-commit release
         env:
-          GH_TOKEN: ${D}{{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          TAG="visgame-${D}{GITHUB_SHA:0:12}"
+          TAG="visgame-${GITHUB_SHA:0:12}"
           printf 'VIS Horizon game source commit: %s\nMinecraft assets: not included.\nHorizon Launcher: not included.\nRequires the player to own Minecraft Java Edition 26.3.\n' "$GITHUB_SHA" > out/RELEASE-NOTES.txt
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists and will not be overwritten"
@@ -111,6 +111,6 @@ jobs:
             out/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "VIS Horizon 26.3 · ${D}{GITHUB_SHA:0:12}" \
+            --title "VIS Horizon 26.3 · ${GITHUB_SHA:0:12}" \
             --notes-file out/RELEASE-NOTES.txt \
             --latest
