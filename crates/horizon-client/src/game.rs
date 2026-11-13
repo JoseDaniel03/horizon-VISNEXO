@@ -2800,6 +2800,10 @@ struct Game<'a> {
     /// search tab, so the letter it carries is not typed into the box.
     creative_ignore_text: bool,
     control: Option<horizon_client::control::Server>,
+    #[cfg(feature = "friends")]
+    portals: Option<horizon_client::control::Server>,
+    #[cfg(feature = "friends")]
+    portals_checked: bool,
     /// The Agent Control setting the socket was last opened or closed for (`agent_settings`).
     agent_control_on: bool,
     /// When an agent's last command came.
@@ -11817,6 +11821,10 @@ impl<'a> Game<'a> {
             creative_screen: prepared.creative_screen,
             creative_ignore_text: false,
             control: None,
+            #[cfg(feature = "friends")]
+            portals: None,
+            #[cfg(feature = "friends")]
+            portals_checked: false,
             agent_control_on: false,
             agent_last: None,
             frame_stats: Default::default(),

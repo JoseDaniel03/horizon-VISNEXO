@@ -13,6 +13,7 @@ use horizon_friends::{Host, HostConfig, HostEvent, PathMode, host::DEFAULT_PORT,
 use horizon_protocol::{GAME_VERSION, PROTOCOL_VERSION};
 use std::time::{Duration, Instant};
 
+mod portals;
 mod screen;
 
 use screen::{self as friends_screen, Action, FriendsView};
@@ -334,6 +335,71 @@ impl Game<'_> {
                 })))
             }
             _ => Err("friends host|stop|status".into()),
+        }
+    }
+}
+
+/// A launcher-only endpoint, separate from agent control. No gameplay cheats,
+/// scripts, file access or arbitrary commands are exposed through this channel.
+/// The existing transport binds loopback, authenticates a random token, and
+/// writes its descriptor privately. Nothing listens unless VIS opts in.
+pub(super) fn portals_endpoint() -> Option<horizon_client::control::Server> {
+    let path = std::env::var_os("VIS_PORTALS_ENDPOINT")?;
+    let path = std::path::Path::new(&path);
+    if !path.is_absolute() || path.extension().is_none_or(|ext| ext != "json") {
+        log::warn!("VIS Portals: endpoint must be an absolute JSON descriptor path");
+        return None;
+    }
+    match horizon_client::control::Server::start(path) {
+        Ok(server) => Some(server),
+        Err(error) => {
+            log::warn!("VIS Portals: endpoint unavailable: {error}");
+            None
+        }
+    }
+}
+
+impl Game<'_> {
+    pub(super) fn poll_portals(&mut self) {
+        if !self.portals_checked {
+            self.portals_checked = true;
+            if self.serving.is_none() && self.options.dedicated.is_none() {
+                self.portals = portals_endpoint();
+            }
+        }
+        // Bound work per frame even if a local authenticated client misbehaves.
+        for _ in 0..4 {
+            let Some(request) = self.portals.as_ref().and_then(|p| p.try_recv()) else {
+                break;
+            };
+            let result = self.portals_command(&request.line);
+            let value = match result {
+                Ok(value) => value,
+                Err(error) => serde_json::json!({"error": error.to_string()}),
+            };
+            let _ = request.reply.send(value.to_string());
+        }
+    }
+
+    fn portals_command(&mut self, line: &str) -> Result<serde_json::Value> {
+        use serde_json::json;
+        match portals::parse(line)? {
+            portals::Command::Hello => Ok(json!({"vis_portals": 1, "minecraft": GAME_VERSION})),
+            portals::Command::Friends(action) => {
+                let mut value = self
+                    .friends_control(&["friends", action])?
+                    .ok_or("VIS Portals command unavailable")?;
+                value["can_join"] = json!(self.title.is_some());
+                Ok(value)
+            }
+            portals::Command::Join(address) => {
+                if self.title.is_none() {
+                    return Err("leave the current world before accepting an invitation".into());
+                }
+                let name = self.options.player_name();
+                self.connect_server(address, &name)?;
+                Ok(json!({"ok": true}))
+            }
         }
     }
 }
