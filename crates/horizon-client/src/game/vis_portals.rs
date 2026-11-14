@@ -403,7 +403,9 @@ impl Game<'_> {
         .rev()
         .collect();
         batch.text(atlas, &input, tx, y + h - 42.0, u32::MAX, true);
-        let actions = [
+        // Keep voice and world controls inside the game's F8 panel.
+        // Two rows of three buttons remain legible in narrow game windows.
+        let mut actions = vec![
             (
                 "voice",
                 if self.vis_ui.snapshot["voice"]["connected"] == true {
@@ -417,11 +419,14 @@ impl Game<'_> {
             ("mode", tr("vis.voice.mode", "PTT / Open mic")),
             ("devices", tr("vis.voice.devices", "Devices")),
         ];
+        if self.vis_ui.snapshot["world_sharing"] == true {
+            actions.push(("stop", tr("vis.portals.stop", "Stop sharing")));
+        }
+        let rows=(actions.len()+2)/3;
         for (i, (_id, label)) in actions.iter().enumerate() {
-            let bx = x + 8.0 + i as f32 * (w - 16.0) / 5.0;
-            let by = y + h - 66.0;
-            let bw = (w - 20.0) / 5.0;
-
+            let bx = x + 8.0 + (i % 3) as f32 * (w - 16.0) / 3.0;
+            let by = y + h - 66.0 - (rows - 1 - i / 3) as f32 * 22.0;
+            let bw = (w - 20.0) / 3.0;
             ui::button(
                 batch,
                 atlas,
@@ -471,14 +476,14 @@ impl Game<'_> {
                 return;
             }
         }
-        for i in 0..5 {
-            if ui::hovered(
-                self.cursor,
-                x + 8.0 + i as f32 * (width - 16.0) / 5.0,
-                y + (h - 16.0).max(100.0) - 66.0,
-                (width - 20.0) / 5.0,
-                18.0,
-            ) {
+        let buttons=if self.vis_ui.snapshot["world_sharing"]==true {6} else {5};
+        let rows=(buttons+2)/3;
+        let game_height=(h-16.0).max(100.0);
+        for i in 0..buttons {
+            let bx=x + 8.0 + (i%3) as f32 * (width - 16.0) / 3.0;
+            let by=y + game_height - 66.0 - (rows - 1 - i/3) as f32 * 22.0;
+            let bw=(width - 20.0) / 3.0;
+            if ui::hovered(self.cursor,bx,by,bw,18.0) {
                 match i {
                     0 => {
                         let action = if self.vis_ui.snapshot["voice"]["connected"] == true {
@@ -490,8 +495,7 @@ impl Game<'_> {
                     }
                     1 => {
                         if !self.vis_ui.selected.is_empty() {
-                            self.vis_ui
-                                .emit(json!({"type":"invite","to":self.vis_ui.selected}));
+                            self.vis_ui.emit(json!({"type":"invite","to":self.vis_ui.selected}));
                         }
                     }
                     2 => {
@@ -509,12 +513,10 @@ impl Game<'_> {
                         } else {
                             "open"
                         };
-                        self.vis_ui
-                            .emit(json!({"type":"voice","action":"mode","value":next}));
+                        self.vis_ui.emit(json!({"type":"voice","action":"mode","value":next}));
                     }
-                    _ => self
-                        .vis_ui
-                        .emit(json!({"type":"voice","action":"settings"})),
+                    4 => self.vis_ui.emit(json!({"type":"voice","action":"settings"})),
+                    _ => self.vis_ui.emit(json!({"type":"stop"})),
                 }
                 return;
             }
