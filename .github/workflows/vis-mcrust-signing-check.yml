@@ -1,0 +1,47 @@
+name: VIS McRust - Verify Android signing configuration
+
+# Never print or upload secret values. This only checks existence and key usability.
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/vis-portals-worlds]
+    paths:
+      - '.github/workflows/vis-mcrust-signing-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Validate stable Android signing key (no artifact)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Install Java keytool
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Check private signing material without printing it
+        env:
+          VIS_ANDROID_KEYSTORE_B64: ${{ secrets.VIS_MCRUST_ANDROID_KEYSTORE_B64 }}
+          VIS_ANDROID_STORE_PASSWORD: ${{ secrets.VIS_MCRUST_ANDROID_STORE_PASSWORD }}
+          VIS_ANDROID_KEY_PASSWORD: ${{ secrets.VIS_MCRUST_ANDROID_KEY_PASSWORD }}
+          VIS_ANDROID_KEY_ALIAS: ${{ secrets.VIS_MCRUST_ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in VIS_ANDROID_KEYSTORE_B64 VIS_ANDROID_STORE_PASSWORD VIS_ANDROID_KEY_PASSWORD VIS_ANDROID_KEY_ALIAS; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error title=Missing GitHub Actions secret::$name is not configured"
+              exit 1
+            fi
+          done
+          umask 077
+          key="$RUNNER_TEMP/vis-mcrust-signing-check.p12"
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$VIS_ANDROID_KEYSTORE_B64" | base64 --decode > "$key"
+          test -s "$key"
+          keytool -list -keystore "$key" -storetype PKCS12 -storepass:env VIS_ANDROID_STORE_PASSWORD -alias "$VIS_ANDROID_KEY_ALIAS" >/dev/null
+          echo "OK: All four signing secrets exist, the keystore opens, and the alias is valid."
+          echo "No private key was printed or uploaded."
