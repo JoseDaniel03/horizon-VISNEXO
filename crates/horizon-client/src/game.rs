@@ -144,6 +144,8 @@ mod entity;
 mod entity_culling;
 mod entity_sounds;
 mod event_loop;
+#[cfg(target_os = "android")]
+mod android_touch;
 mod events;
 mod execution_role;
 mod explosion;
@@ -621,7 +623,7 @@ use winit::{
     application::ApplicationHandler,
     error::EventLoopError,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    event_loop::{ActiveEventLoop, ControlFlow},
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Window, WindowId},
 };
@@ -2370,6 +2372,8 @@ struct Game<'a> {
     last_input: Instant,
     /// Controllers (Horizon's own).
     pad: pad::Pads,
+    #[cfg(target_os = "android")]
+    android_touch: horizon_client::touch::TouchControls,
     frames: u64,
     /// The glint clock and options, read once at the start of each frame
     /// (game/item_draw.rs).
@@ -6297,6 +6301,8 @@ impl Game<'_> {
         if show_hud {
             self.draw_pad_guide(&mut batch, guide_from);
         }
+        #[cfg(target_os = "android")]
+        self.android_touch_hud(&mut batch);
         batch
     }
     fn draw_inventory(&mut self, batch: &mut HudBatch) {
@@ -11592,6 +11598,8 @@ impl<'a> Game<'a> {
             frame_end: now,
             last_input: now,
             pad: Default::default(),
+            #[cfg(target_os = "android")]
+            android_touch: android_touch::controls(),
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
@@ -12376,7 +12384,11 @@ pub fn run_with() -> Result<()> {
     horizon_world::datafix::set_resources(
         &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
     );
-    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()) {
+    #[cfg(target_os = "android")]
+    let downloading = crate::android::has_resource_installer();
+    #[cfg(not(target_os = "android"))]
+    let downloading = false;
+    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()).filter(|_| !downloading) {
         // The game build started by hand (the release's zip), not by the
         // launcher: a window says where to get it. Scripts and servers get
         // the error.

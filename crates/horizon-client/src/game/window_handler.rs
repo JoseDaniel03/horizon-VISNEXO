@@ -69,6 +69,14 @@ impl Game<'_> {
         if !ours {
             return;
         }
+        #[cfg(target_os = "android")]
+        {
+            if matches!(event, WindowEvent::Focused(false)) { self.android_touch.clear(); }
+            if let WindowEvent::Touch(touch) = &event {
+                self.android_touch_event(event_loop,id,*touch,origin);
+                return;
+            }
+        }
         if locks_out(origin, self.scripted_run(), &event) {
             return;
         }

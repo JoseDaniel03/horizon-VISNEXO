@@ -389,6 +389,11 @@ pub(super) fn spawn_loader(
     let handle = std::thread::Builder::new()
         .name("resource-loader".into())
         .spawn(move || {
+            #[cfg(target_os = "android")]
+            if let Err(error) = crate::android::prepare_resources(&vanilla_root) {
+                let _ = sender.send(LoaderMsg::Done(Err(error)));
+                return;
+            }
             let (root, pack_error) = startup_resource_root(&vanilla_root, &settings, &dev_mods);
             let result = load_resources(
                 root,
@@ -1004,6 +1009,16 @@ impl Loading {
         event_loop: &dyn EventLoopCtl,
         event: WindowEvent,
     ) -> Result<()> {
+        #[cfg(target_os = "android")]
+        if let WindowEvent::Touch(touch) = &event {
+            use winit::event::TouchPhase;
+            let touch=*touch;
+            self.menu_event(event_loop,WindowEvent::CursorMoved{device_id:touch.device_id,position:touch.location})?;
+            if touch.phase!=TouchPhase::Moved {
+                self.menu_event(event_loop,WindowEvent::MouseInput{device_id:touch.device_id,state:if touch.phase==TouchPhase::Started{ElementState::Pressed}else{ElementState::Released},button:MouseButton::Left})?;
+            }
+            return Ok(());
+        }
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && let PhysicalKey::Code(key) = event.physical_key
         {
