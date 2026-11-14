@@ -1023,6 +1023,10 @@ impl Loading {
             if touch.phase!=TouchPhase::Moved {
                 self.menu_event(event_loop,WindowEvent::MouseInput{device_id:touch.device_id,state:if touch.phase==TouchPhase::Started{ElementState::Pressed}else{ElementState::Released},button:MouseButton::Left})?;
             }
+            if touch.phase==TouchPhase::Started || touch.phase==TouchPhase::Ended {
+                let typing=if self.menu.options_open {self.menu.options.typing()}else{self.menu.title.as_mut().is_some_and(|title|title.has_caret_field()||title.focused_field().is_some())};
+                if let Some(window)=&self.window {window.set_ime_allowed(typing);}
+            }
             return Ok(());
         }
         if let WindowEvent::KeyboardInput { event, .. } = &event
@@ -1061,6 +1065,10 @@ impl Loading {
             return Ok(());
         }
         match event {
+            #[cfg(target_os="android")]
+            WindowEvent::Ime(winit::event::Ime::Commit(text)) if !self.menu.options_open && self.menu.pending.is_none() => {
+                if let Some(title)=&mut self.menu.title {title.type_text(&text);}
+            }
             WindowEvent::CloseRequested => {
                 if !self.settings.quit_shortcuts
                     && horizon_client::input::is_quit_shortcut_down(
