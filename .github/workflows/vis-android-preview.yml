@@ -16,6 +16,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+      - name: Check three-platform release contract
+        run: python3 -m unittest discover -s tools -p test_vis_mcrust_release.py
       - name: Install NDK and check the current fork, never another game tree
         shell: bash
         run: |

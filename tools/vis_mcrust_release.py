@@ -17,6 +17,7 @@ def contract(root, out, commit):
     android=json.loads((out/'android-engine.json').read_text())
     if android['engine_commit'] != commit or android['package']!='com.visstudios.mcrust': raise ValueError('Android engine differs from PC')
     if not re.fullmatch('[0-9a-f]{64}',android['certificate_sha256']): raise ValueError('Signing certificate required')
+    if not isinstance(android['version_code'], int) or not 1 <= android['version_code'] <= 2100000000: raise ValueError('Android version code outside platform limits')
     targets['android-arm64'].update({key:android[key] for key in ['package','version_code','certificate_sha256']})
     return dict(schema=1,source_repo='https://github.com/JoseDaniel03/horizon-VISNEXO.git',engine_commit=commit,minecraft=version,protocol=integer('PROTOCOL_VERSION'),data_version=integer('DATA_VERSION'),resource_pack=pair('RESOURCE_PACK_FORMAT'),data_pack=pair('DATA_PACK_FORMAT'),targets=targets)
 

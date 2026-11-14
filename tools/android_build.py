@@ -168,6 +168,8 @@ def main():
     except (OSError, subprocess.CalledProcessError):
         environment['HORIZON_ANDROID_BUILD_COMMIT'] = 'source-export'
         environment['HORIZON_ANDROID_BUILD_DIRTY'] = 'unknown'
+    if args.public and environment['HORIZON_ANDROID_BUILD_DIRTY'] != 'false':
+        raise ValueError('Public APK must be built from a clean immutable engine checkout')
     if args.release_candidate:
         flags = environment.get('CARGO_ENCODED_RUSTFLAGS', '').split('\x1f') if environment.get('CARGO_ENCODED_RUSTFLAGS') else environment.get('RUSTFLAGS', '').split()
         for original, replacement in [(Path.home(), '/build'), (ROOT, '/horizon')]:

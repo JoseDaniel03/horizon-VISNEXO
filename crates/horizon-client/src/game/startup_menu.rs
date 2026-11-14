@@ -1421,6 +1421,8 @@ mod tests {
             delivered: false,
             handle: None,
             shown: false,
+            #[cfg(target_os = "android")]
+            android_suspended: false,
             ui_at: None,
             title_drawn: false,
             menu: StartupMenu::default(),
