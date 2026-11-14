@@ -267,10 +267,10 @@ impl Game<'_> {
                 },
             ),
         ];
-        for (i, (id, label)) in controls.iter().enumerate() {
+        for (i, (_id, label)) in controls.iter().enumerate() {
             let bx = x + 8.0 + i as f32 * (w - 16.0) / 4.0;
             let bw = (w - 20.0) / 4.0;
-            widgets::label(id, label, [bx, y + 22.0, bw, 18.0], true);
+
             ui::button(
                 batch,
                 atlas,
@@ -299,12 +299,7 @@ impl Game<'_> {
                     f["presence"].as_str().unwrap_or("offline")
                 );
                 let by = y + 48.0 + i as f32 * 20.0;
-                widgets::label(
-                    &format!("friend-{i}"),
-                    &label,
-                    [x + 8.0, by, left - 10.0, 18.0],
-                    true,
-                );
+
                 ui::button(
                     batch,
                     atlas,
@@ -346,7 +341,7 @@ impl Game<'_> {
                 let decline = tr("vis.portals.decline", "Decline");
                 for (j, label) in [join, decline].iter().enumerate() {
                     let bx = tx + j as f32 * (bw + 2.0);
-                    widgets::label(&format!("invite-{i}-{j}"), label, [bx, by, bw, 18.0], true);
+
                     ui::button(
                         batch,
                         atlas,
@@ -422,11 +417,11 @@ impl Game<'_> {
             ("mode", tr("vis.voice.mode", "PTT / Open mic")),
             ("devices", tr("vis.voice.devices", "Devices")),
         ];
-        for (i, (id, label)) in actions.iter().enumerate() {
+        for (i, (_id, label)) in actions.iter().enumerate() {
             let bx = x + 8.0 + i as f32 * (w - 16.0) / 5.0;
             let by = y + h - 66.0;
             let bw = (w - 20.0) / 5.0;
-            widgets::label(id, label, [bx, by, bw, 18.0], true);
+
             ui::button(
                 batch,
                 atlas,
