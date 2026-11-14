@@ -2373,7 +2373,7 @@ struct Game<'a> {
     /// Controllers (Horizon's own).
     pad: pad::Pads,
     #[cfg(target_os = "android")]
-    android_touch: horizon_client::touch::TouchControls,
+    android_touch: horizon_client_render::touch::TouchControls,
     #[cfg(target_os = "android")]
     android_suspended: bool,
     frames: u64,

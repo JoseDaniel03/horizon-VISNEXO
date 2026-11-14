@@ -1,6 +1,6 @@
 //! Android translates touch into existing controller/mouse paths; simulation stays shared.
 use super::*;
-use horizon_client::touch::{TouchControls, layout::{Control, HIDDEN}};
+use horizon_client_render::touch::{TouchControls, layout::{Control, HIDDEN}};
 use winit::event::{Touch, TouchPhase};
 pub(super) fn controls() -> TouchControls {
     let mut controls=TouchControls::default();
@@ -16,8 +16,8 @@ impl Game<'_> {
                 let size=window.inner_size();
                 self.android_touch.viewport(size.width,size.height);
                 let delta=self.android_touch.update(touch.id,[touch.location.x as f32/size.width.max(1) as f32,touch.location.y as f32/size.height.max(1) as f32],touch.phase==TouchPhase::Started,matches!(touch.phase,TouchPhase::Ended|TouchPhase::Cancelled));
-                let delta=horizon_client::touch::camera_delta(delta,size.width,size.height,&self.android_touch.settings);
-                self.look_turn(delta[0],delta[1]);
+                let delta=horizon_client_render::touch::camera_delta(delta,size.width,size.height,&self.android_touch.settings);
+                self.look_turn(f64::from(delta[0]),f64::from(delta[1]));
             }
         } else {
             self.android_touch.clear();
@@ -35,7 +35,7 @@ impl Game<'_> {
             if !self.android_touch.settings.visible(c){continue;}
             let [x,y,rw,rh]=self.android_touch.settings.placement(c).rect(w/h.max(1.));
             batch.fill(atlas,x*w,y*h,rw*w,rh*h,0x66333333);
-            let label=lang::get_or(&format!("vis.touch.{}",c.name().to_ascii_lowercase()),c.name());
+            let label=horizon_client_render::lang::get_or(&format!("vis.touch.{}",c.name().to_ascii_lowercase()),c.name());
             batch.text(atlas,&label,x*w+2.,y*h+2.,0xffffffff,true);
         }
     }

@@ -370,7 +370,7 @@ impl Game<'_> {
         #[cfg(target_os = "android")]
         {
             self.settings.controller.enabled = true;
-            self.pad.feed = Some(self.android_touch.poll_state().merge(&horizon_client::android_runtime::pad_state()));
+            self.pad.feed = Some(self.android_touch.poll_state().merge(&horizon_client_render::android_runtime::pad_state()));
         }
         self.pad.virtual_input = self.pad.injected != PadState::default();
         let context = self.pad_context();

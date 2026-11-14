@@ -384,3 +384,9 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FO
 OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
+
+The Android official-resource reconstruction helpers in `crates/horizon-android`
+and platform packaging scripts `tools/android_build.py`, `tools/android_prepare.py`
+and `tools/check_android_release.py` also adapt Starling's MIT platform work at
+`fa548eb7abe91c194d3780e4580b9746323cd606` (Vasysik and the Starling contributors).
+They do not replace this fork's gameplay engine. The MIT notice above applies.
