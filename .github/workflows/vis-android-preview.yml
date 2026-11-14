@@ -1,0 +1,25 @@
+name: VIS shared engine Android check
+on:
+  push:
+    branches: [codex/vis-portals-worlds, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shared-engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - name: Check three-platform release contract
+        run: python3 -m unittest discover -s tools -p test_vis_mcrust_release.py
+      - name: Install NDK and check the current fork, never another game tree
+        shell: bash
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;28.2.13676358'
+          python3 tools/android_build.py --check --abi arm64-v8a --sdk "$ANDROID_HOME" --java-home "$JAVA_HOME_17_X64" --ndk-version 28.2.13676358 --build-tools-version 35.0.0

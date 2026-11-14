@@ -62,3 +62,11 @@ mod tests {
         );
     }
 }
+
+/// One platform event loop, always bound to Android's real NativeActivity.
+pub(super) fn create() -> Result<winit::event_loop::EventLoop<()>, winit::error::EventLoopError> {
+    #[cfg(target_os = "android")]
+    { crate::android::event_loop() }
+    #[cfg(not(target_os = "android"))]
+    { winit::event_loop::EventLoop::new() }
+}

@@ -5,7 +5,8 @@ name: VIS Nexo - Portable Horizon Game
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    # Preview builds run on the integration branch; stable publication stays main-only.
+    branches: [main, codex/vis-portals-worlds]
     paths:
       - '.github/workflows/vis-nexo-portable.yml'
       - 'Cargo.toml'
@@ -20,6 +21,10 @@ on:
       - 'tools/verify_vis_nexo_archive.py'
       - 'tools/ci/**'
       - 'packaging/windows/**'
+      - 'packaging/android/**'
+      - 'tools/android_*.py'
+      - 'tools/check_android_release.py'
+      - 'tools/vis_mcrust_release.py'
       - 'research-lock.json'
       - 'LICENSE'
       - 'THIRD_PARTY_NOTICES.md'
@@ -39,6 +44,10 @@ on:
       - 'tools/verify_vis_nexo_archive.py'
       - 'tools/ci/**'
       - 'packaging/windows/**'
+      - 'packaging/android/**'
+      - 'tools/android_*.py'
+      - 'tools/check_android_release.py'
+      - 'tools/vis_mcrust_release.py'
       - 'research-lock.json'
       - 'LICENSE'
       - 'THIRD_PARTY_NOTICES.md'
@@ -122,14 +131,145 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  android:
+    name: Android from the same engine commit
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libxkbcommon-dev
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+      - name: Prepare engine tables with this fork's exporter
+        run: python3 tools/android_prepare.py --java-home "$JAVA_HOME_25_X64"
+      - name: Build and audit signed native APK
+        env:
+          VIS_ANDROID_KEYSTORE_B64: ${{ secrets.VIS_MCRUST_ANDROID_KEYSTORE_B64 }}
+          VIS_ANDROID_STORE_PASSWORD: ${{ secrets.VIS_MCRUST_ANDROID_STORE_PASSWORD }}
+          VIS_ANDROID_KEY_PASSWORD: ${{ secrets.VIS_MCRUST_ANDROID_KEY_PASSWORD }}
+          VIS_ANDROID_KEY_ALIAS: ${{ secrets.VIS_MCRUST_ANDROID_KEY_ALIAS }}
+        run: |
+          test -n "$VIS_ANDROID_KEYSTORE_B64" || { echo 'Stable Android signing secrets are required'; exit 1; }
+          mkdir -p .local/android
+          python3 -c 'import os,base64,pathlib; pathlib.Path(".local/android/debug.keystore").write_bytes(base64.b64decode(os.environ["VIS_ANDROID_KEYSTORE_B64"],validate=True))'
+          python3 tools/android_build.py --public --abi arm64-v8a --profile release --sdk "$ANDROID_HOME" --java-home "$JAVA_HOME_17_X64" --gradle "$(command -v gradle)" --ndk-version 28.2.13676358 --build-tools-version 35.0.0 --dev-build "$GITHUB_RUN_NUMBER" --dev-version-code "$((1000+GITHUB_RUN_NUMBER))"
+          mkdir -p android-out
+          cp .local/android/apk/arm64-v8a/horizon-android-public.apk android-out/vis-horizon-android-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs android-out/vis-horizon-android-arm64.apk > .local/android/cert.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging android-out/vis-horizon-android-arm64.apk > .local/android/package.txt
+          python3 - <<'PYMETA'
+          import os,json,re,pathlib
+          cert=pathlib.Path('.local/android/cert.txt').read_text()
+          pkg=pathlib.Path('.local/android/package.txt').read_text()
+          signature=re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]{64})',cert)
+          package=re.search(r"package: name='([^']+)' versionCode='([0-9]+)'",pkg)
+          if signature is None or package is None:
+              raise ValueError('APK signing identity or package metadata missing')
+          name,version=package.group(1),int(package.group(2))
+          expected=1000+int(os.environ['GITHUB_RUN_NUMBER'])
+          if name!='com.visstudios.mcrust' or version!=expected:
+              raise ValueError('Built APK package/version differs from release manifest')
+          if 'application-debuggable' in pkg:
+              raise ValueError('Release APK must not be debuggable')
+          pathlib.Path('android-out/android-engine.json').write_text(json.dumps(dict(
+              engine_commit=os.environ['GITHUB_SHA'],package=name,version_code=version,
+              certificate_sha256=signature.group(1).lower())))
+          PYMETA
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vis-game-android-arm64
+          path: android-out/*
+          if-no-files-found: error
+      - name: Remove signing material
+        if: always()
+        run: rm -f .local/android/debug.keystore
+
+  android-preview:
+    name: Android ARM64 test APK — disposable signing (NOT stable)
+    if: github.ref == 'refs/heads/codex/vis-portals-worlds'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      VIS_ANDROID_STORE_PASSWORD: android
+      VIS_ANDROID_KEY_PASSWORD: android
+      VIS_ANDROID_KEY_ALIAS: vis-preview
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+      - name: Install Android SDK and native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libxkbcommon-dev
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+      - name: Prepare generated engine tables
+        run: python3 tools/android_prepare.py --java-home "$JAVA_HOME_25_X64"
+      - name: Create temporary testing certificate (never a release key)
+        run: |
+          mkdir -p .local/android
+          keytool -genkeypair -noprompt -keystore .local/android/debug.keystore -storepass android -keypass android -alias vis-preview -keyalg RSA -keysize 2048 -validity 10 -dname 'CN=VIS McRust Testing,O=VIS Studios' -storetype PKCS12
+      - name: Build and audit public-payload Android test APK
+        run: |
+          python3 tools/android_build.py --public --abi arm64-v8a --profile release --sdk "$ANDROID_HOME" --java-home "$JAVA_HOME_17_X64" --gradle "$(command -v gradle)" --ndk-version 28.2.13676358 --build-tools-version 35.0.0 --dev-build "$GITHUB_RUN_NUMBER" --dev-version-code "$((1000+GITHUB_RUN_NUMBER))"
+          mkdir -p android-test
+          cp .local/android/apk/arm64-v8a/horizon-android-public.apk android-test/VIS-McRust-Android-ARM64-TEST.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs android-test/VIS-McRust-Android-ARM64-TEST.apk > android-test/certificate.txt
+          (cd android-test && sha256sum VIS-McRust-Android-ARM64-TEST.apk > SHA256SUMS && sha256sum --check SHA256SUMS)
+          printf '%s\n' 'TEST ONLY: This Android game uses a disposable signing certificate. It cannot be updated in-place to the stable game. Uninstall the test game before installing a stable signed release. Not distributed through the VIS Nexo verified stable catalog. No Mojang-owned game assets are bundled.' > android-test/README-TEST.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vis-mcrust-android-test
+          path: android-test/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove disposable keystore
+        if: always()
+        run: rm -f .local/android/debug.keystore
+
   release:
     name: Publish portable game for VIS Nexo
-    needs: game
+    needs: [game, android]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: vis-game-*
@@ -141,8 +281,11 @@ jobs:
           cd out
           sha256sum --check vis-horizon-linux-x86_64.tar.gz.sha256
           sha256sum --check vis-horizon-windows-x64.zip.sha256
+          sha256sum vis-horizon-android-arm64.apk > android.sha256
           cat *.sha256 > SHA256SUMS
-          test "$(wc -l < SHA256SUMS)" -eq 2
+          test "$(wc -l < SHA256SUMS)" -eq 3
+          cd ..
+          python3 tools/vis_mcrust_release.py --out out --commit "$GITHUB_SHA"
       - name: Publish immutable source-commit release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -158,6 +301,8 @@ jobs:
           gh release create "$TAG" \
             out/vis-horizon-linux-x86_64.tar.gz \
             out/vis-horizon-windows-x64.zip \
+            out/vis-horizon-android-arm64.apk \
+            out/vis-mcrust-release.json \
             out/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \

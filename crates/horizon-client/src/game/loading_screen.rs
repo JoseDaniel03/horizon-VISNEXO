@@ -29,7 +29,7 @@ pub(super) fn run_event_loop(mut game: Game<'_>) -> Result<()> {
         return game.error.take().map_or(Ok(()), Err);
     }
     let mut split = split::Split::new(game);
-    let result = EventLoop::new()?.run_app(&mut split);
+    let result = event_loop::create()?.run_app(&mut split);
     game = split.host;
     narrator::stop();
     leave_fullscreen_after(&result, &mut game.settings);
@@ -63,6 +63,8 @@ pub(super) struct Loading {
     pub(super) delivered: bool,
     pub(super) handle: Option<JoinHandle<()>>,
     pub(super) shown: bool,
+    #[cfg(target_os = "android")]
+    pub(super) android_suspended: bool,
     /// When the menu bundle arrived (`set_ui`), and whether a title frame with
     /// it was presented since: the world renderer waits for that frame
     /// (`ready_for_handoff`).
@@ -84,6 +86,14 @@ impl Loading {
             || self.ui_at.is_none_or(|at| at.elapsed() >= TITLE_FRAME_WAIT)
     }
     pub(super) fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        if self.android_suspended {
+            self.android_suspended = false;
+            if let Some(renderer) = &mut self.renderer {
+                if let Err(error) = renderer.recreate_surface() { self.error = Some(error); event_loop.exit(); }
+            }
+            return;
+        }
         if self.window.is_some() {
             return;
         }
@@ -400,6 +410,16 @@ pub(super) enum App {
     Ready(Box<split::Split<'static>>),
 }
 impl ApplicationHandler for App {
+    #[cfg(target_os = "android")]
+    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        match self {
+            App::Ready(game) => game.suspended(event_loop),
+            App::Loading(loading) => {
+                loading.android_suspended = true;
+                if let Some(renderer) = &mut loading.renderer { renderer.suspend_surface(); }
+            }
+        }
+    }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         match self {
             App::Loading(loading) => loading.resumed(event_loop),
@@ -407,6 +427,8 @@ impl ApplicationHandler for App {
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        #[cfg(target_os = "android")]
+        if matches!(self, App::Loading(loading) if loading.android_suspended) { return; }
         match self {
             App::Loading(loading) => loading.window_event(event_loop, id, event),
             App::Ready(game) => game.window_event(event_loop, id, event),
@@ -418,6 +440,8 @@ impl ApplicationHandler for App {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        if matches!(self, App::Loading(loading) if loading.android_suspended) { return; }
         enum Step {
             Waiting,
             Ready(Box<split::Split<'static>>),

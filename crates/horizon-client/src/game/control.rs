@@ -184,6 +184,8 @@ impl Game<'_> {
         }
     }
     pub(super) fn poll_control(&mut self, event_loop: &dyn EventLoopCtl) {
+        #[cfg(feature = "friends")]
+        self.poll_portals();
         if let Some((deadline, reply)) = self.pending_bench.take() {
             if Instant::now() >= deadline {
                 let _ = reply.send(self.summary_with_passes().to_string());

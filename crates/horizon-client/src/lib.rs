@@ -13,3 +13,14 @@ pub mod mod_api;
 mod brewing_speed_load_tests;
 #[cfg(test)]
 mod living_death_tests;
+
+#[cfg(target_os = "android")]
+pub mod android;
+
+/// Platform launch arguments; Android supplies them through the validated native host.
+pub fn launch_arguments() -> Vec<String> {
+    #[cfg(target_os = "android")]
+    { android::arguments() }
+    #[cfg(not(target_os = "android"))]
+    { std::env::args().skip(1).collect() }
+}

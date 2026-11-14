@@ -367,6 +367,11 @@ impl Game<'_> {
 
     /// Once per loop iteration: read the pads and act on button changes.
     pub(super) fn poll_pads(&mut self, event_loop: &dyn EventLoopCtl) {
+        #[cfg(target_os = "android")]
+        {
+            self.settings.controller.enabled = true;
+            self.pad.feed = Some(self.android_touch.poll_state().merge(&horizon_client_render::android_runtime::pad_state()));
+        }
         self.pad.virtual_input = self.pad.injected != PadState::default();
         let context = self.pad_context();
         if let Some(old) = self.pad.context.filter(|old| *old != context) {

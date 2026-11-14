@@ -1,5 +1,6 @@
 //! Title, world selection and world creation screens (TitleScreen,
 //! SelectWorldScreen, CreateWorldScreen layouts), drawn as HUD quads.
+mod vis_project;
 use crate::{
     dialog_screen::BOX,
     game_rules_screen::{Exit, RulesScreen},
@@ -1872,6 +1873,29 @@ impl Title {
         };
         match &self.mode {
             Mode::Main => {
+                if let Some(menu) = vis_project::config() {
+                    return menu
+                        .buttons
+                        .iter()
+                        .map(|item| {
+                            let width = (w * item.width).clamp(40.0, w.max(40.0));
+                            let id = match item.action.as_str() {
+                                "play" => 201,
+                                "settings" => 3,
+                                "friends" => 5,
+                                _ => 2,
+                            };
+                            b(
+                                (w * item.x - width / 2.0).clamp(0.0, (w - width).max(0.0)),
+                                (h * item.y).clamp(0.0, (h - 20.0).max(0.0)),
+                                width,
+                                &item.label,
+                                id != 201 || self.allows_multiplayer,
+                                id,
+                            )
+                        })
+                        .collect();
+                }
                 let cx = (w / 2.0).floor();
                 let y = (h / 4.0).floor() + 48.0;
                 let mut buttons = vec![
@@ -3667,6 +3691,15 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         }
     }
     fn click_action(&mut self, x: f32, y: f32, (w, h): (f32, f32), hit: Option<u8>) -> Action {
+        if matches!(self.mode, Mode::Main) && hit == Some(201) {
+            if let Some(menu) = vis_project::config() {
+                return Action::Connect {
+                    address: menu.server.clone(),
+                    lan: false,
+                    realm: false,
+                };
+            }
+        }
         match (&mut self.mode, hit) {
             (Mode::Main, Some(1)) => {
                 // The title button is no longer part of the world-select screen.

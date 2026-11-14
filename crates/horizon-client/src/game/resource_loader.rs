@@ -292,13 +292,15 @@ pub(super) fn run_loading(
         delivered: false,
         handle: Some(loader),
         shown: false,
+            #[cfg(target_os = "android")]
+            android_suspended: false,
         ui_at: None,
         title_drawn: false,
         menu,
         error: None,
     };
     let mut app = App::Loading(Box::new(loading));
-    let result = EventLoop::new()?.run_app(&mut app);
+    let result = event_loop::create()?.run_app(&mut app);
     narrator::stop();
     match &mut app {
         // Ready: splitscreen around P1's game.

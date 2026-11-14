@@ -144,6 +144,8 @@ mod entity;
 mod entity_culling;
 mod entity_sounds;
 mod event_loop;
+#[cfg(target_os = "android")]
+mod android_touch;
 mod events;
 mod execution_role;
 mod explosion;
@@ -166,6 +168,10 @@ mod friends;
 mod held_items;
 #[cfg(test)]
 mod setblock_order_tests;
+#[cfg(feature = "friends")]
+mod vis_portals;
+#[cfg(feature = "horizon-extras")]
+mod vis_voice_server;
 // Without Play with Friends: nothing shared, no Friends button (game/friends_off.rs).
 #[cfg(test)]
 mod entity_inside_tests;
@@ -617,7 +623,7 @@ use winit::{
     application::ApplicationHandler,
     error::EventLoopError,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    event_loop::{ActiveEventLoop, ControlFlow},
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Window, WindowId},
 };
@@ -2366,6 +2372,10 @@ struct Game<'a> {
     last_input: Instant,
     /// Controllers (Horizon's own).
     pad: pad::Pads,
+    #[cfg(target_os = "android")]
+    android_touch: horizon_client_render::touch::TouchControls,
+    #[cfg(target_os = "android")]
+    android_suspended: bool,
     frames: u64,
     /// The glint clock and options, read once at the start of each frame
     /// (game/item_draw.rs).
@@ -2800,6 +2810,12 @@ struct Game<'a> {
     /// search tab, so the letter it carries is not typed into the box.
     creative_ignore_text: bool,
     control: Option<horizon_client::control::Server>,
+    #[cfg(feature = "friends")]
+    vis_portals_bridge: Option<horizon_client::control::Server>,
+    #[cfg(feature = "friends")]
+    portals_checked: bool,
+    #[cfg(feature = "friends")]
+    vis_ui: vis_portals::State,
     /// The Agent Control setting the socket was last opened or closed for (`agent_settings`).
     agent_control_on: bool,
     /// When an agent's last command came.
@@ -5535,6 +5551,8 @@ impl Game<'_> {
         // Only a server ticks its own world from here: its players are guests, swapped in for
         // their turns (`as_guest`), and the window's player is a client of it.
         self.ticks += 1;
+        #[cfg(feature = "horizon-extras")]
+        self.publish_vis_voice_positions();
         self.repro_tick();
         self.track_experience_display();
         self.tick_enchanting_book();
@@ -5836,6 +5854,8 @@ impl Game<'_> {
         self.frame_graph
             .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
         self.draw_pad_over_hud(&mut batch);
+        #[cfg(feature = "friends")]
+        self.draw_vis_notice(&mut batch);
         batch
     }
     fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
@@ -5896,6 +5916,11 @@ impl Game<'_> {
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
             self.draw_music_toast(&mut batch, false);
+            return batch;
+        }
+        #[cfg(feature = "friends")]
+        if self.title.is_some() && self.screen == Screen::Friends && self.vis_portals_bridge.is_some() {
+            self.draw_vis_portals(&mut batch);
             return batch;
         }
         if self.title.is_some() {
@@ -6278,6 +6303,8 @@ impl Game<'_> {
         if show_hud {
             self.draw_pad_guide(&mut batch, guide_from);
         }
+        #[cfg(target_os = "android")]
+        self.android_touch_hud(&mut batch);
         batch
     }
     fn draw_inventory(&mut self, batch: &mut HudBatch) {
@@ -9860,6 +9887,10 @@ impl Game<'_> {
     /// it a handler both can call and a `gamepad::Route` (screenshot and fullscreen do this). A
     /// screen's own raw keys, text and mods' key hooks stay raw on purpose.
     fn handle_window_event_inner(&mut self, event_loop: &dyn EventLoopCtl, mut event: WindowEvent) {
+        #[cfg(feature = "friends")]
+        if self.vis_input(&event) {
+            return;
+        }
         if let WindowEvent::Focused(false) = &event {
             self.physical_keys.clear();
             self.physical_buttons.clear();
@@ -11569,6 +11600,10 @@ impl<'a> Game<'a> {
             frame_end: now,
             last_input: now,
             pad: Default::default(),
+            #[cfg(target_os = "android")]
+            android_touch: android_touch::controls(),
+            #[cfg(target_os = "android")]
+            android_suspended: false,
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
@@ -11817,6 +11852,12 @@ impl<'a> Game<'a> {
             creative_screen: prepared.creative_screen,
             creative_ignore_text: false,
             control: None,
+            #[cfg(feature = "friends")]
+            vis_portals_bridge: None,
+            #[cfg(feature = "friends")]
+            portals_checked: false,
+            #[cfg(feature = "friends")]
+            vis_ui: Default::default(),
             agent_control_on: false,
             agent_last: None,
             frame_stats: Default::default(),
@@ -12347,7 +12388,11 @@ pub fn run_with() -> Result<()> {
     horizon_world::datafix::set_resources(
         &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
     );
-    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()) {
+    #[cfg(target_os = "android")]
+    let downloading = crate::android::has_resource_installer();
+    #[cfg(not(target_os = "android"))]
+    let downloading = false;
+    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()).filter(|_| !downloading) {
         // The game build started by hand (the release's zip), not by the
         // launcher: a window says where to get it. Scripts and servers get
         // the error.

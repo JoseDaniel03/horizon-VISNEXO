@@ -11,7 +11,6 @@ name = "horizon-official"
 path = "src/main.rs"
 
 [dependencies]
-horizon-game = { path = "../horizon-game" }
 horizon-platform = { path = "../horizon-platform" }
 horizon-heartbeat = { path = "../horizon-heartbeat" }
 horizon-friends = { path = "../horizon-friends", features = ["game"] }
@@ -25,3 +24,7 @@ winresource = "0.1"
 
 [lints]
 workspace = true
+
+# The Android NativeActivity calls the shared engine directly after register().
+[target.'cfg(not(target_os = "android"))'.dependencies]
+horizon-game = { path = "../horizon-game" }
