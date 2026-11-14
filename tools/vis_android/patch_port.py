@@ -45,6 +45,31 @@ def apply(root):
                 self.fail(error);
             }
         }''')
+    replace_once(launcher, '    fn resumed(&mut self, events: &ActiveEventLoop) {', '\n'.join([
+        '    fn resumed(&mut self, events: &ActiveEventLoop) {',
+        '        if self.game.is_none() { self.take_nexo_request(); }',
+    ]))
+    replace_once(launcher, '    pub(super) fn refresh_wardrobe_account(&mut self) {', '\n'.join([
+        '    fn take_nexo_request(&mut self) {',
+        '        if let Some(request) = crate::vis_nexo::request() {',
+        '            self.catalog.config.name = request.name;',
+        '            self.catalog.config.server = request.server;',
+        '            self.catalog.config.vis_world_key = format!("{}/{}", request.owner, request.instance);',
+        '            self.nexo_pending = true;',
+        '            self.error = None;',
+        '        }',
+        '    }',
+        '    pub(super) fn refresh_wardrobe_account(&mut self) {',
+    ]))
+    replace_once(launcher, '        crate::game::android_reset_bundled_mods();', '        crate::game::android_reset_bundled_mods();\n        self.take_nexo_request();')
+    activity = root/'packaging/android/java/dev/horizon/android/HorizonActivity.java'
+    replace_once(activity, '    @Override protected void onActivityResult', '\n'.join([
+        '    @Override protected void onNewIntent(android.content.Intent intent) {',
+        '        super.onNewIntent(intent);',
+        '        setIntent(intent);',
+        '    }',
+        '    @Override protected void onActivityResult',
+    ]))
     catalog = client/'android/catalog.rs'
     replace_once(catalog, '    pub profile: u32,', '    pub profile: u32,\n    #[serde(skip)]\n    pub vis_world_key: String,')
     replace_once(catalog, '    pub fn profile_home(&self, home: &Path) -> PathBuf {', '\n'.join([
@@ -61,7 +86,7 @@ def apply(root):
     ]))
     manifest=root/'packaging/android/AndroidManifest.xml'
     replace_once(manifest, 'android:label="Horizon Android"', 'android:label="VIS McRust Preview"')
-    replace_once(manifest, 'android:name="dev.horizon.android.HorizonActivity" android:exported="false"', 'android:name="dev.horizon.android.HorizonActivity" android:exported="true"')
+    replace_once(manifest, 'android:name="dev.horizon.android.HorizonActivity" android:exported="false"', 'android:name="dev.horizon.android.HorizonActivity" android:exported="true" android:launchMode="singleTask"')
     # Package and APK audit must agree; preserve all public payload checks.
     build=root/'tools/android_build.py'
     text=build.read_text().replace('dev.horizon.android.dev',PACKAGE)

@@ -36,6 +36,7 @@ pub(crate) fn request() -> Option<Request> {
         if value.is_null() { return Ok(None); }
         let value = JString::from(value);
         let text: String = env.get_string(&value)?.into();
+        env.call_method(&intent, "removeExtra", "(Ljava/lang/String;)V", &[JValue::Object(&key)])?;
         Ok(Some(text))
     }).flatten()?;
     parse(&raw)
