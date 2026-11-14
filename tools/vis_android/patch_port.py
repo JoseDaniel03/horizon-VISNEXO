@@ -29,6 +29,7 @@ def apply(root):
         if let Some(request) = &nexo {
             catalog.config.name = request.name.clone();
             catalog.config.server = request.server.clone();
+            catalog.config.vis_world_key = format!("{}/{}", request.owner, request.instance);
         }''')
     replace_once(launcher, '            home,\n', '            home,\n            nexo_pending: nexo.is_some(),\n')
     replace_once(launcher, '        self.catalog.poll(&self.home);', '''        self.catalog.poll(&self.home);
@@ -44,6 +45,20 @@ def apply(root):
                 self.fail(error);
             }
         }''')
+    catalog = client/'android/catalog.rs'
+    replace_once(catalog, '    pub profile: u32,', '    pub profile: u32,\n    #[serde(skip)]\n    pub vis_world_key: String,')
+    replace_once(catalog, '    pub fn profile_home(&self, home: &Path) -> PathBuf {', '\n'.join([
+        '    pub fn profile_home(&self, home: &Path) -> PathBuf {',
+        '        if !self.vis_world_key.is_empty() {',
+        '            return home.join("vis-worlds").join(&self.vis_world_key);',
+        '        }',
+    ]))
+    prepare = root/'tools/android_prepare.py'
+    replace_once(prepare, "    lab.download(entry['url'], manifest_path, entry['sha1'])", "\n".join([
+        "    # Use the exact metadata accepted by this engine, even if Mojang republishes its catalog.",
+        "    manifest_pin = pins['manifest_sha1']",
+        "    lab.download(f'https://piston-meta.mojang.com/v1/packages/{manifest_pin}/{version}.json', manifest_path, manifest_pin)",
+    ]))
     manifest=root/'packaging/android/AndroidManifest.xml'
     replace_once(manifest, 'android:label="Horizon Android"', 'android:label="VIS McRust Preview"')
     replace_once(manifest, 'android:name="dev.horizon.android.HorizonActivity" android:exported="false"', 'android:name="dev.horizon.android.HorizonActivity" android:exported="true"')
