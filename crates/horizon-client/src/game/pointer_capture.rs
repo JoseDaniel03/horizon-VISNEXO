@@ -45,6 +45,10 @@ impl Game<'_> {
     }
     /// `Minecraft.pause`: a single-player game with a pausing screen open.
     pub(super) fn pauses_game(&self) -> bool {
+        #[cfg(feature = "friends")]
+        if self.screen == Screen::Friends && self.portals.is_some() && self.vis_ui.run_world {
+            return false;
+        }
         self.has_singleplayer_server()
             && !self.is_published()
             && !self.has_split_players()
