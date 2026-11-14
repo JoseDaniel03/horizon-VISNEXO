@@ -60,6 +60,8 @@ impl Game<'_> {
         mut event: WindowEvent,
         origin: input_trace::InputOrigin,
     ) {
+        #[cfg(target_os = "android")]
+        if self.android_suspended { return; }
         // A headless game has no window: its events (the frame, the control socket's input)
         // carry `WindowId::dummy()`.
         let ours = match &self.window {
@@ -181,6 +183,8 @@ impl Game<'_> {
     /// winit's `about_to_wait`: what happens between frames (stop requests, the closing
     /// save, world entry, the control socket, pads), then the next frame.
     pub(super) fn idle(&mut self, event_loop: &dyn EventLoopCtl) {
+        #[cfg(target_os = "android")]
+        if self.android_suspended { return; }
         // A splitscreen player's game has nothing to save: P1's shuts the process down.
         if horizon_threads::stop_requests() > 0
             && !self.options.split_guest
@@ -284,7 +288,28 @@ impl Game<'_> {
 }
 
 impl ApplicationHandler for Game<'_> {
+    #[cfg(target_os = "android")]
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.android_suspended = true;
+        self.android_touch.clear();
+        self.capture(false);
+        self.keys.clear();
+        self.physical_keys.clear();
+        if self.title.is_none() && self.screen == Screen::Playing { self.screen = Screen::Paused; }
+        self.pause = self.pauses_game();
+        if let Some(server) = &self.integrated { server.set_paused(self.pause); }
+        if let Some(renderer) = &mut self.renderer { renderer.suspend_surface(); }
+    }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        if self.android_suspended {
+            self.android_suspended = false;
+            if let Some(renderer) = &mut self.renderer {
+                if let Err(error) = renderer.recreate_surface() { self.error = Some(error); event_loop.exit(); }
+            }
+            self.previous = Instant::now();
+            return;
+        }
         if self.window.is_some() {
             return;
         }

@@ -2374,6 +2374,8 @@ struct Game<'a> {
     pad: pad::Pads,
     #[cfg(target_os = "android")]
     android_touch: horizon_client::touch::TouchControls,
+    #[cfg(target_os = "android")]
+    android_suspended: bool,
     frames: u64,
     /// The glint clock and options, read once at the start of each frame
     /// (game/item_draw.rs).
@@ -11600,6 +11602,8 @@ impl<'a> Game<'a> {
             pad: Default::default(),
             #[cfg(target_os = "android")]
             android_touch: android_touch::controls(),
+            #[cfg(target_os = "android")]
+            android_suspended: false,
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),

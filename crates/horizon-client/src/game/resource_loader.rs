@@ -292,6 +292,8 @@ pub(super) fn run_loading(
         delivered: false,
         handle: Some(loader),
         shown: false,
+            #[cfg(target_os = "android")]
+            android_suspended: false,
         ui_at: None,
         title_drawn: false,
         menu,
