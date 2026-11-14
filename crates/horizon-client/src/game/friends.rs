@@ -202,6 +202,10 @@ impl Game<'_> {
     /// Play with Friends. The world is paused under it in singleplayer, so
     /// new codes and sessions are read while it is drawn.
     pub(super) fn draw_friends_screen(&mut self, batch: &mut HudBatch) {
+        if self.portals.is_some() {
+            self.draw_vis_portals(batch);
+            return;
+        }
         self.tick_friends();
         let view = self.friends_view();
         horizon_client::widgets::begin_screen(|| {
@@ -210,6 +214,10 @@ impl Game<'_> {
         friends_screen::draw(batch, &self.gui.atlas, self.cursor, &view, true);
     }
     pub(super) fn friends_screen_click(&mut self) {
+        if self.portals.is_some() {
+            self.click_vis_portals();
+            return;
+        }
         let view = self.friends_view();
         let Some(action) =
             friends_screen::click(&self.gui.atlas, self.gui_size(), self.cursor, &view)
@@ -243,7 +251,7 @@ impl Game<'_> {
 
     /// Whether the pause menu offers Play with Friends (a singleplayer world).
     pub(super) fn friends_shown(&self) -> bool {
-        self.friends_view().shown
+        self.portals.is_some() || self.friends_view().shown
     }
 
     /// What Play with Friends shows.
@@ -367,6 +375,13 @@ impl Game<'_> {
                 self.portals = portals_endpoint();
             }
         }
+        if self
+            .vis_ui
+            .received
+            .is_some_and(|at| at.elapsed().as_secs() > 5)
+        {
+            self.vis_ui = Default::default();
+        }
         // Bound work per frame even if a local authenticated client misbehaves.
         for _ in 0..4 {
             let Some(request) = self.portals.as_ref().and_then(|p| p.try_recv()) else {
@@ -383,6 +398,15 @@ impl Game<'_> {
 
     fn portals_command(&mut self, line: &str) -> Result<serde_json::Value> {
         use serde_json::json;
+        if let Some(snapshot) = line.strip_prefix("social ") {
+            self.vis_ui.update(serde_json::from_str(snapshot)?)?;
+            let events: Vec<_> = self.vis_ui.events.drain(..).collect();
+            return Ok(json!({"ok":true,"events":events}));
+        }
+        if line == "events" {
+            let events: Vec<_> = self.vis_ui.events.drain(..).collect();
+            return Ok(json!({"events":events}));
+        }
         match portals::parse(line)? {
             portals::Command::Hello => Ok(json!({"vis_portals": 1, "minecraft": GAME_VERSION})),
             portals::Command::Friends(action) => {

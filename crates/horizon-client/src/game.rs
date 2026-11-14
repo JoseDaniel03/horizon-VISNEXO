@@ -166,6 +166,10 @@ mod friends;
 mod held_items;
 #[cfg(test)]
 mod setblock_order_tests;
+#[cfg(feature = "friends")]
+mod vis_portals;
+#[cfg(feature = "horizon-extras")]
+mod vis_voice_server;
 // Without Play with Friends: nothing shared, no Friends button (game/friends_off.rs).
 #[cfg(test)]
 mod entity_inside_tests;
@@ -2804,6 +2808,8 @@ struct Game<'a> {
     portals: Option<horizon_client::control::Server>,
     #[cfg(feature = "friends")]
     portals_checked: bool,
+    #[cfg(feature = "friends")]
+    vis_ui: vis_portals::State,
     /// The Agent Control setting the socket was last opened or closed for (`agent_settings`).
     agent_control_on: bool,
     /// When an agent's last command came.
@@ -5539,6 +5545,8 @@ impl Game<'_> {
         // Only a server ticks its own world from here: its players are guests, swapped in for
         // their turns (`as_guest`), and the window's player is a client of it.
         self.ticks += 1;
+        #[cfg(feature = "horizon-extras")]
+        self.publish_vis_voice_positions();
         self.repro_tick();
         self.track_experience_display();
         self.tick_enchanting_book();
@@ -5840,6 +5848,8 @@ impl Game<'_> {
         self.frame_graph
             .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
         self.draw_pad_over_hud(&mut batch);
+        #[cfg(feature = "friends")]
+        self.draw_vis_notice(&mut batch);
         batch
     }
     fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
@@ -5900,6 +5910,11 @@ impl Game<'_> {
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
             self.draw_music_toast(&mut batch, false);
+            return batch;
+        }
+        #[cfg(feature = "friends")]
+        if self.title.is_some() && self.screen == Screen::Friends && self.portals.is_some() {
+            self.draw_vis_portals(&mut batch);
             return batch;
         }
         if self.title.is_some() {
@@ -9864,6 +9879,10 @@ impl Game<'_> {
     /// it a handler both can call and a `gamepad::Route` (screenshot and fullscreen do this). A
     /// screen's own raw keys, text and mods' key hooks stay raw on purpose.
     fn handle_window_event_inner(&mut self, event_loop: &dyn EventLoopCtl, mut event: WindowEvent) {
+        #[cfg(feature = "friends")]
+        if self.vis_input(&event) {
+            return;
+        }
         if let WindowEvent::Focused(false) = &event {
             self.physical_keys.clear();
             self.physical_buttons.clear();
@@ -11825,6 +11844,8 @@ impl<'a> Game<'a> {
             portals: None,
             #[cfg(feature = "friends")]
             portals_checked: false,
+            #[cfg(feature = "friends")]
+            vis_ui: Default::default(),
             agent_control_on: false,
             agent_last: None,
             frame_stats: Default::default(),
