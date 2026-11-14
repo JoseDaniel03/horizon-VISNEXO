@@ -79,7 +79,7 @@ fn tr(key: &str, fallback: &str) -> String {
 }
 impl Game<'_> {
     pub(super) fn vis_input(&mut self, event: &WindowEvent) -> bool {
-        if self.portals.is_none() {
+        if self.vis_portals_bridge.is_none() {
             return false;
         }
         if self.screen == Screen::Friends {

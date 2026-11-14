@@ -4,21 +4,8 @@ run-name: VIS Android preview · ${{ github.sha }}
 on:
   push:
     branches: [codex/vis-portals-worlds]
-    paths:
-      - 'tools/vis_android/**'
-      - '.github/workflows/vis-android-preview.yml'
-      - 'crates/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rust-toolchain.toml'
-      - 'research-lock.json'
-      - 'packaging/android/**'
-      - 'tools/**'
-      - 'mods/**'
-      - 'third_party/**'
-      - '.github/workflows/android-dev.yml'
-      - 'LICENSE'
-      - 'THIRD_PARTY_NOTICES.md'
+    # The Android source is pinned externally; desktop-only edits do not rebuild it.
+    paths: ['tools/vis_android/**']
   workflow_dispatch:
     inputs:
       all_abis:

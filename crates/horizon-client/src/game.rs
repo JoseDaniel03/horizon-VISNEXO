@@ -2805,7 +2805,7 @@ struct Game<'a> {
     creative_ignore_text: bool,
     control: Option<horizon_client::control::Server>,
     #[cfg(feature = "friends")]
-    portals: Option<horizon_client::control::Server>,
+    vis_portals_bridge: Option<horizon_client::control::Server>,
     #[cfg(feature = "friends")]
     portals_checked: bool,
     #[cfg(feature = "friends")]
@@ -5913,7 +5913,7 @@ impl Game<'_> {
             return batch;
         }
         #[cfg(feature = "friends")]
-        if self.title.is_some() && self.screen == Screen::Friends && self.portals.is_some() {
+        if self.title.is_some() && self.screen == Screen::Friends && self.vis_portals_bridge.is_some() {
             self.draw_vis_portals(&mut batch);
             return batch;
         }
@@ -11841,7 +11841,7 @@ impl<'a> Game<'a> {
             creative_ignore_text: false,
             control: None,
             #[cfg(feature = "friends")]
-            portals: None,
+            vis_portals_bridge: None,
             #[cfg(feature = "friends")]
             portals_checked: false,
             #[cfg(feature = "friends")]

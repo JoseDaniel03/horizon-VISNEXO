@@ -202,7 +202,7 @@ impl Game<'_> {
     /// Play with Friends. The world is paused under it in singleplayer, so
     /// new codes and sessions are read while it is drawn.
     pub(super) fn draw_friends_screen(&mut self, batch: &mut HudBatch) {
-        if self.portals.is_some() {
+        if self.vis_portals_bridge.is_some() {
             self.draw_vis_portals(batch);
             return;
         }
@@ -214,7 +214,7 @@ impl Game<'_> {
         friends_screen::draw(batch, &self.gui.atlas, self.cursor, &view, true);
     }
     pub(super) fn friends_screen_click(&mut self) {
-        if self.portals.is_some() {
+        if self.vis_portals_bridge.is_some() {
             self.click_vis_portals();
             return;
         }
@@ -251,7 +251,7 @@ impl Game<'_> {
 
     /// Whether the pause menu offers Play with Friends (a singleplayer world).
     pub(super) fn friends_shown(&self) -> bool {
-        self.portals.is_some() || self.friends_view().shown
+        self.vis_portals_bridge.is_some() || self.friends_view().shown
     }
 
     /// What Play with Friends shows.
@@ -372,7 +372,7 @@ impl Game<'_> {
         if !self.portals_checked {
             self.portals_checked = true;
             if self.serving.is_none() && self.options.dedicated.is_none() {
-                self.portals = portals_endpoint();
+                self.vis_portals_bridge = portals_endpoint();
             }
         }
         if self
@@ -384,7 +384,7 @@ impl Game<'_> {
         }
         // Bound work per frame even if a local authenticated client misbehaves.
         for _ in 0..4 {
-            let Some(request) = self.portals.as_ref().and_then(|p| p.try_recv()) else {
+            let Some(request) = self.vis_portals_bridge.as_ref().and_then(|p| p.try_recv()) else {
                 break;
             };
             let result = self.portals_command(&request.line);
