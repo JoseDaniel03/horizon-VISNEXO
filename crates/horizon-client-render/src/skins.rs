@@ -759,11 +759,30 @@ pub fn offline_cape() -> Option<&'static [u8]> {
     .as_deref()
 }
 
+/// Optional VIS Nexo public skin passed from Android's separate application
+/// through an explicit, size-bounded Intent extra. The payload is PNG pixels,
+/// NEVER a user password, Minecraft credential or VIS session token.
+static VIS_ANDROID_OFFLINE_SKIN:std::sync::OnceLock<(Vec<u8>,bool)>=std::sync::OnceLock::new();
+
+pub fn install_vis_offline_skin(bytes:&[u8],model:&str)->Result<(),String>{
+    if bytes.len()<33||bytes.len()>65536 ||
+        !bytes.starts_with(&[137,80,78,71,13,10,26,10])||
+        &bytes[12..16]!=b"IHDR"{
+        return Err("VIS skin PNG fuera de límites".into());
+    }
+    let (w,h,rgba)=crate::hud::decode_bytes(bytes).map_err(|_|"VIS skin PNG inválido")?;
+    let texture=process_legacy_skin(w,h,&rgba)
+        .ok_or("VIS skin debe ser 64x64 o 64x32")?;
+    VIS_ANDROID_OFFLINE_SKIN.set((texture,model=="slim"))
+        .map_err(|_|"VIS skin ya configurada en este proceso".into())
+}
+
 /// The skin the launcher gives an offline name (`HORIZON_OFFLINE_SKIN`, a
 /// PNG's path, and `HORIZON_OFFLINE_SKIN_MODEL`, `classic` or `slim`;
 /// launcher/src/skins.rs): its 64x64 RGBA as `process_legacy_skin` lays it
 /// out, and whether it is slim. Read once.
 pub fn offline_skin() -> Option<&'static (Vec<u8>, bool)> {
+    if let Some(skin)=VIS_ANDROID_OFFLINE_SKIN.get(){return Some(skin);}
     static SKIN: std::sync::OnceLock<Option<(Vec<u8>, bool)>> = std::sync::OnceLock::new();
     SKIN.get_or_init(|| {
         let path = std::env::var_os("HORIZON_OFFLINE_SKIN").filter(|p| !p.is_empty())?;
