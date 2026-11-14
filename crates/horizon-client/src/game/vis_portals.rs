@@ -8,6 +8,8 @@ use horizon_client::{
 };
 use serde_json::{Value, json};
 use std::collections::VecDeque;
+mod layout;
+use layout::Panel;
 use winit::{
     event::{ElementState, WindowEvent},
     keyboard::{KeyCode, PhysicalKey},
@@ -56,6 +58,18 @@ impl State {
         if !value.is_object() || value.to_string().len() > 12000 {
             return Err("invalid social snapshot");
         }
+        let disconnected = value["connected"] == false;
+        let account_changed = self.snapshot["account"]["username"] != value["account"]["username"];
+        if disconnected || account_changed {
+            self.selected.clear();
+            self.draft.clear();
+            self.search.clear();
+            self.chat_offset = 0;
+            self.friend_offset = 0;
+            self.events.clear();
+            self.notice = None;
+            self.last_notice.clear();
+        }
         if self.snapshot["auto_pause"] != value["auto_pause"] {
             self.run_world = value["auto_pause"] == false;
         }
@@ -64,6 +78,9 @@ impl State {
             self.notice = Some(std::time::Instant::now());
         }
         self.last_notice = id.to_owned();
+        if disconnected {
+            self.notice = None;
+        }
         self.friend_offset = self.friend_offset.min(
             value["friends"]
                 .as_array()
@@ -84,9 +101,8 @@ impl Game<'_> {
         }
         if self.screen == Screen::Friends {
             let (w, h) = self.gui_size();
-            let width = (w - 12.0).max(1.0).min(500.0);
-            let height = (h - 16.0).max(1.0);
-            let (x, y) = self.vis_ui.origin.unwrap_or(((w - width) / 2.0, 8.0));
+            let panel = Panel::new(w, h, self.vis_ui.origin);
+            let (x, y, width, height) = (panel.x, panel.y, panel.w, panel.h);
             match event {
                 WindowEvent::MouseWheel { delta, .. } => {
                     let amount = match delta {
@@ -96,7 +112,7 @@ impl Game<'_> {
                     let count = self.vis_ui.snapshot["friends"]
                         .as_array()
                         .map_or(0, Vec::len);
-                    if self.cursor.0 > x + width * 0.35 {
+                    if self.cursor.0 > x + panel.left {
                         if amount > 0.0 {
                             self.vis_ui.chat_offset = self.vis_ui.chat_offset.saturating_add(3);
                         } else {
@@ -122,7 +138,7 @@ impl Game<'_> {
                     ..
                 } => {
                     if *state == ElementState::Pressed
-                        && ui::hovered(self.cursor, x, y, width, 20.0)
+                        && ui::hovered(self.cursor, x, y, width, 32.0)
                     {
                         self.vis_ui.drag = Some((self.cursor.0 - x, self.cursor.1 - y));
                         return true;
@@ -219,13 +235,7 @@ impl Game<'_> {
                                 self.vis_ui.searching = false;
                                 return true;
                             }
-                            if !self.vis_ui.selected.is_empty()
-                                && !self.vis_ui.draft.trim().is_empty()
-                            {
-                                let event = json!({"type":"send","to":self.vis_ui.selected,"body":self.vis_ui.draft});
-                                self.vis_ui.emit(event);
-                                self.vis_ui.draft.clear();
-                            }
+                            self.vis_send();
                         }
                         _ => {
                             if let Some(text) = event.text.as_deref() {
@@ -240,252 +250,356 @@ impl Game<'_> {
         false
     }
     pub(super) fn draw_vis_portals(&mut self, batch: &mut HudBatch) {
+        let p = Panel::new(batch.width, batch.height, self.vis_ui.origin);
         let atlas = &self.gui.atlas;
-        let w = (batch.width - 12.0).clamp(200.0, 500.0);
-        let h = (batch.height - 16.0).max(100.0);
-        let (x, y) = self.vis_ui.origin.unwrap_or(((batch.width - w) / 2.0, 8.0));
+        let connected = self.vis_ui.snapshot["connected"] == true;
         widgets::begin_screen(|| widgets::ScreenInfo::new("vis-portals", "VIS Portals"));
-        batch.fill(atlas, x, y, w, h, rgba(18, 13, 32, 242));
-        batch.text(atlas, "VIS PORTALS", x + 8.0, y + 7.0, u32::MAX, true);
-        let controls = [
-            ("close", tr("vis.portals.close", "Close")),
-            ("pause", tr("vis.portals.pause", "Pause / Resume")),
-            (
-                "mute",
-                if self.vis_ui.snapshot["voice"]["muted"] == true {
-                    tr("vis.voice.muted", "Mic: OFF")
-                } else {
-                    tr("vis.voice.unmuted", "Mic: ON")
-                },
-            ),
-            (
-                "deafen",
-                if self.vis_ui.snapshot["voice"]["deaf"] == true {
-                    tr("vis.voice.deaf", "Audio: OFF")
-                } else {
-                    tr("vis.voice.listening", "Audio: ON")
-                },
-            ),
-        ];
-        for (i, (_id, label)) in controls.iter().enumerate() {
-            let bx = x + 8.0 + i as f32 * (w - 16.0) / 4.0;
-            let bw = (w - 20.0) / 4.0;
-
+        batch.fill(atlas, p.x, p.y, p.w, p.h, rgba(13, 14, 19, 248));
+        batch.fill(atlas, p.x, p.y, p.w, 2., rgba(154, 134, 255, 255));
+        batch.text(atlas, "VIS PORTALS", p.x + 8., p.y + 9., u32::MAX, false);
+        let identity = self.vis_ui.snapshot["account"]["display_name"]
+            .as_str()
+            .unwrap_or("");
+        let status = if connected {
+            tr("vis.portals.connected", "Connected to Nexo")
+        } else {
+            tr("vis.portals.disconnected", "Nexo disconnected")
+        };
+        let subtitle = fit(atlas, &format!("{identity} · {status}"), p.w - 16.);
+        batch.text(
+            atlas,
+            &subtitle,
+            p.x + 8.,
+            p.y + 23.,
+            if connected {
+                rgba(69, 194, 122, 255)
+            } else {
+                rgba(240, 122, 104, 255)
+            },
+            false,
+        );
+        for (action, r, label, enabled) in self.vis_buttons(p) {
+            let [x, y, w, h] = r;
+            let _ = action;
             ui::button(
                 batch,
                 atlas,
-                bx,
-                y + 22.0,
-                bw,
-                18.0,
-                &Text::literal(label),
-                true,
-                ui::hovered(self.cursor, bx, y + 22.0, bw, 18.0),
+                x,
+                y,
+                w,
+                h,
+                &Text::literal(fit(atlas, &label, w - 8.)),
+                enabled,
+                ui::hovered(self.cursor, x, y, w, h),
             );
         }
-        let left = (w * 0.35).min(150.0);
-        let rows = ((h - 110.0) / 20.0).max(0.0) as usize;
+        if p.compact() {
+            batch.text(
+                atlas,
+                &fit(
+                    atlas,
+                    &tr("vis.portals.expand", "Enlarge the window to show friends"),
+                    p.w - 16.,
+                ),
+                p.x + 8.,
+                p.y + 64.,
+                rgba(159, 163, 174, 255),
+                false,
+            );
+            return;
+        }
+        batch.fill(
+            atlas,
+            p.x + p.left,
+            p.y + 62.,
+            1.,
+            p.h - 158.,
+            rgba(36, 38, 47, 255),
+        );
+        let count = self.vis_ui.snapshot["friends"]
+            .as_array()
+            .map_or(0, Vec::len);
+        batch.text(
+            atlas,
+            &format!("{} · {count}", tr("vis.portals.contacts", "Friends")),
+            p.x + 8.,
+            p.y + 61.,
+            rgba(159, 163, 174, 255),
+            false,
+        );
         if let Some(friends) = self.vis_ui.snapshot["friends"].as_array() {
             for (i, f) in friends
                 .iter()
                 .skip(self.vis_ui.friend_offset)
-                .take(rows)
+                .take(p.rows())
                 .enumerate()
             {
+                let [x, y, w, h] = p.row(i);
                 let user = f["username"].as_str().unwrap_or("");
-                let label = format!(
-                    "{} · {}",
-                    f["name"].as_str().unwrap_or(user),
-                    f["presence"].as_str().unwrap_or("offline")
-                );
-                let by = y + 48.0 + i as f32 * 20.0;
-
+                let selected = user == self.vis_ui.selected;
+                if selected {
+                    batch.fill(atlas, x, y, w, h, rgba(40, 37, 58, 255));
+                }
                 ui::button(
                     batch,
                     atlas,
-                    x + 8.0,
-                    by,
-                    left - 10.0,
-                    18.0,
-                    &Text::literal(&label),
-                    true,
-                    ui::hovered(self.cursor, x + 8.0, by, left - 10.0, 18.0),
+                    x,
+                    y,
+                    w,
+                    h,
+                    &Text::literal(fit(atlas, f["name"].as_str().unwrap_or(user), w - 12.)),
+                    connected,
+                    ui::hovered(self.cursor, x, y, w, h),
                 );
+                let color = match f["presence"].as_str() {
+                    Some("online") => rgba(69, 194, 122, 255),
+                    Some("away") => rgba(224, 181, 84, 255),
+                    Some("busy") => rgba(240, 122, 104, 255),
+                    _ => rgba(139, 143, 156, 255),
+                };
+                batch.fill(atlas, x + 2., y + 8., 3., 6., color);
             }
         }
-        let tx = x + left + 6.0;
-        batch.text(atlas, &self.vis_ui.selected, tx, y + 48.0, u32::MAX, true);
-        if let Some(error) = self.vis_ui.snapshot["error"]
-            .as_str()
-            .filter(|v| !v.is_empty())
-        {
-            let text: String = error.chars().take(60).collect();
+        if count == 0 {
             batch.text(
                 atlas,
-                &text,
-                x + 8.0,
-                y + h - 27.0,
-                rgba(255, 140, 140, 255),
-                true,
+                &fit(
+                    atlas,
+                    &tr("vis.portals.empty", "No friends to show"),
+                    p.left - 16.,
+                ),
+                p.x + 8.,
+                p.y + 78.,
+                rgba(159, 163, 174, 255),
+                false,
             );
         }
+        let tx = p.chat_x();
+        let chat_width = p.w - p.left - 20.;
+        let title = if self.vis_ui.selected.is_empty() {
+            tr("vis.portals.select", "Select a friend")
+        } else {
+            self.vis_ui.selected.clone()
+        };
+        batch.text(
+            atlas,
+            &fit(atlas, &title, chat_width),
+            tx,
+            p.y + 61.,
+            u32::MAX,
+            false,
+        );
         if let Some(invites) = self.vis_ui.snapshot["invitations"].as_array() {
             for (i, invite) in invites.iter().take(2).enumerate() {
-                let by = y + 62.0 + i as f32 * 20.0;
-                let bw = (w - left - 16.0) / 2.0;
-                let join = format!(
-                    "{} · {}",
-                    invite["sender"].as_str().unwrap_or(""),
-                    tr("vis.portals.join", "Join")
-                );
-                let decline = tr("vis.portals.decline", "Decline");
-                for (j, label) in [join, decline].iter().enumerate() {
-                    let bx = tx + j as f32 * (bw + 2.0);
-
+                for (j, key) in ["join", "decline"].iter().enumerate() {
+                    let bx = tx + j as f32 * (chat_width / 2.);
+                    let by = p.y + 75. + i as f32 * 20.;
+                    let label = if j == 0 {
+                        format!(
+                            "{} · {}",
+                            invite["sender"].as_str().unwrap_or(""),
+                            tr("vis.portals.join", "Join")
+                        )
+                    } else {
+                        tr("vis.portals.decline", "Decline")
+                    };
                     ui::button(
                         batch,
                         atlas,
                         bx,
                         by,
-                        bw,
-                        18.0,
-                        &Text::literal(label),
-                        true,
-                        ui::hovered(self.cursor, bx, by, bw, 18.0),
+                        chat_width / 2. - 2.,
+                        18.,
+                        &Text::literal(fit(atlas, &label, chat_width / 2. - 8.)),
+                        connected && (j == 1 || self.title.is_some()),
+                        ui::hovered(self.cursor, bx, by, chat_width / 2. - 2., 18.),
                     );
+                    let _ = key;
                 }
             }
         }
+        let invite_count = self.vis_ui.snapshot["invitations"]
+            .as_array()
+            .map_or(0, |a| a.len().min(2));
+        let chat_y = p.y + 78. + invite_count as f32 * 20.;
+        let count = ((p.content_bottom() - chat_y) / 11.).max(0.) as usize;
+        let mut lines = Vec::new();
         if let Some(messages) = self.vis_ui.snapshot["messages"].as_array() {
-            let count = ((h - 180.0) / 10.0).max(0.0) as usize;
-            let mut lines = Vec::new();
-            for message in messages
-                .iter()
-                .filter(|m| m["from"] == self.vis_ui.selected || m["to"] == self.vis_ui.selected)
-            {
-                let text = format!(
-                    "{}: {}",
-                    message["from"].as_str().unwrap_or(""),
-                    message["body"].as_str().unwrap_or("")
-                );
+            for message in messages.iter().filter(|m| {
+                !self.vis_ui.selected.is_empty()
+                    && (m["from"] == self.vis_ui.selected || m["to"] == self.vis_ui.selected)
+            }) {
                 lines.extend(horizon_client::multiplayer::wrap(
-                    &text,
-                    (w - left - 15.0).max(20.0),
+                    &format!(
+                        "{}: {}",
+                        message["from"].as_str().unwrap_or(""),
+                        message["body"].as_str().unwrap_or("")
+                    ),
+                    chat_width,
                     atlas,
                 ));
             }
-            self.vis_ui.chat_offset = self
-                .vis_ui
-                .chat_offset
-                .min(lines.len().saturating_sub(count));
-            let start = lines.len().saturating_sub(count + self.vis_ui.chat_offset);
-            for (i, line) in lines.iter().skip(start).take(count).enumerate() {
-                batch.text(
-                    atlas,
-                    line,
-                    tx,
-                    y + 105.0 + i as f32 * 10.0,
-                    rgba(220, 215, 235, 255),
-                    true,
-                );
-            }
         }
-        let input: String = if self.vis_ui.searching {
+        self.vis_ui.chat_offset = self
+            .vis_ui
+            .chat_offset
+            .min(lines.len().saturating_sub(count));
+        let start = lines.len().saturating_sub(count + self.vis_ui.chat_offset);
+        for (i, line) in lines.iter().skip(start).take(count).enumerate() {
+            batch.text(
+                atlas,
+                line,
+                tx,
+                chat_y + i as f32 * 11.,
+                rgba(197, 199, 209, 255),
+                false,
+            );
+        }
+        batch.fill(
+            atlas,
+            tx,
+            p.y + p.h - 113.,
+            chat_width,
+            20.,
+            rgba(24, 26, 34, 255),
+        );
+        let input = if self.vis_ui.searching {
             &self.vis_ui.search
         } else {
             &self.vis_ui.draft
+        };
+        let input = if input.is_empty() {
+            if self.vis_ui.searching {
+                tr("vis.portals.search_hint", "Search friends…")
+            } else {
+                tr("vis.portals.message_hint", "Write a message…")
+            }
+        } else {
+            input.clone()
+        };
+        batch.text(
+            atlas,
+            &fit(atlas, &input, chat_width - 8.),
+            tx + 4.,
+            p.y + p.h - 107.,
+            rgba(197, 199, 209, 255),
+            false,
+        );
+        let error = self.vis_ui.snapshot["error"].as_str().unwrap_or("");
+        let footer = if error.is_empty() {
+            tr("vis.portals.hint", "Enter: send · Ctrl+F: search")
+        } else {
+            error.to_owned()
+        };
+        batch.text(
+            atlas,
+            &fit(atlas, &footer, p.w - 16.),
+            p.x + 8.,
+            p.y + p.h - 15.,
+            rgba(159, 163, 174, 255),
+            false,
+        );
+    }
+    fn vis_buttons(&self, p: Panel) -> Vec<(usize, [f32; 4], String, bool)> {
+        let online = self.vis_ui.snapshot["connected"] == true;
+        let private = self.has_singleplayer_server() && !self.is_published();
+        let mut buttons = vec![(0, p.top(0), tr("vis.portals.close", "Close"), true)];
+        if p.compact() {
+            return buttons;
         }
-        .chars()
-        .rev()
-        .take(55)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-        batch.text(atlas, &input, tx, y + h - 42.0, u32::MAX, true);
-        // Keep voice and world controls inside the game's F8 panel.
-        // Two rows of three buttons remain legible in narrow game windows.
-        let mut actions = vec![
+        buttons.extend([
             (
-                "voice",
+                1,
+                p.top(1),
+                if self.vis_ui.run_world {
+                    tr("vis.portals.pause", "Pause world")
+                } else {
+                    tr("vis.portals.resume", "Resume world")
+                },
+                private,
+            ),
+            (
+                2,
+                p.top(2),
+                if self.vis_ui.snapshot["voice"]["muted"] == true {
+                    tr("vis.voice.muted", "Mic: OFF")
+                } else {
+                    tr("vis.voice.unmuted", "Mic: ON")
+                },
+                online,
+            ),
+            (
+                3,
+                p.top(3),
+                if self.vis_ui.snapshot["voice"]["deaf"] == true {
+                    tr("vis.voice.deaf", "Audio: OFF")
+                } else {
+                    tr("vis.voice.listening", "Audio: ON")
+                },
+                online,
+            ),
+            (
+                4,
+                p.action(0),
                 if self.vis_ui.snapshot["voice"]["connected"] == true {
                     tr("vis.voice.disconnect", "Leave voice")
                 } else {
                     tr("vis.voice.connect", "Join voice")
                 },
+                online,
             ),
-            ("invite", tr("vis.portals.invite", "Invite")),
-            ("presence", tr("vis.portals.status", "Status")),
-            ("mode", tr("vis.voice.mode", "PTT / Open mic")),
-            ("devices", tr("vis.voice.devices", "Devices")),
-        ];
-        if self.vis_ui.snapshot["world_sharing"] == true {
-            actions.push(("stop", tr("vis.portals.stop", "Stop sharing")));
-        }
-        let rows=(actions.len()+2)/3;
-        for (i, (_id, label)) in actions.iter().enumerate() {
-            let bx = x + 8.0 + (i % 3) as f32 * (w - 16.0) / 3.0;
-            let by = y + h - 66.0 - (rows - 1 - i / 3) as f32 * 22.0;
-            let bw = (w - 20.0) / 3.0;
-            ui::button(
-                batch,
-                atlas,
-                bx,
-                by,
-                bw,
-                18.0,
-                &Text::literal(label),
-                true,
-                ui::hovered(self.cursor, bx, by, bw, 18.0),
-            );
-        }
-        let footer = format!(
-            "{} · {}",
-            tr("vis.portals.hint", "Enter: send · Ctrl+F: search"),
-            self.vis_ui.snapshot["hotkey"].as_str().unwrap_or("F8")
-        );
-        batch.text(
-            atlas,
-            &footer,
-            x + 8.0,
-            y + h - 15.0,
-            rgba(170, 160, 190, 255),
-            true,
-        );
+            (
+                5,
+                p.action(1),
+                tr("vis.portals.invite", "Invite"),
+                online
+                    && !self.vis_ui.selected.is_empty()
+                    && self.title.is_none()
+                    && self.has_singleplayer_server(),
+            ),
+            (
+                6,
+                p.action(2),
+                tr("vis.portals.search", "Search friends"),
+                online,
+            ),
+            (
+                7,
+                p.action(3),
+                tr("vis.voice.mode", "PTT / Open mic"),
+                online,
+            ),
+            (8, p.action(4), tr("vis.voice.devices", "Devices"), online),
+            (
+                9,
+                p.action(5),
+                if self.vis_ui.snapshot["world_sharing"] == true {
+                    tr("vis.portals.stop", "Stop sharing")
+                } else {
+                    tr("vis.portals.send", "Send")
+                },
+                online
+                    && (self.vis_ui.snapshot["world_sharing"] == true
+                        || (!self.vis_ui.selected.is_empty()
+                            && !self.vis_ui.draft.trim().is_empty())),
+            ),
+        ]);
+        buttons
     }
     pub(super) fn click_vis_portals(&mut self) {
         let (w, h) = self.gui_size();
-        let width = (w - 12.0).clamp(200.0, 500.0);
-        let (x, y) = self.vis_ui.origin.unwrap_or(((w - width) / 2.0, 8.0));
-        for i in 0..4 {
-            let bx = x + 8.0 + i as f32 * (width - 16.0) / 4.0;
-            if ui::hovered(self.cursor, bx, 30.0, (width - 20.0) / 4.0, 18.0) {
-                match i {
+        let p = Panel::new(w, h, self.vis_ui.origin);
+        for (id, [x, y, w, h], _, enabled) in self.vis_buttons(p) {
+            if enabled && ui::hovered(self.cursor, x, y, w, h) {
+                match id {
                     0 => {
                         self.screen = Screen::Playing;
                         self.capture(self.title.is_none());
                     }
-                    1 => {
-                        if self.has_singleplayer_server() && !self.is_published() {
-                            self.vis_ui.run_world = !self.vis_ui.run_world;
-                        }
-                    }
+                    1 => self.vis_ui.run_world = !self.vis_ui.run_world,
                     2 => self.vis_ui.emit(json!({"type":"voice","action":"mute"})),
-                    _ => self.vis_ui.emit(json!({"type":"voice","action":"deafen"})),
-                }
-                return;
-            }
-        }
-        let buttons=if self.vis_ui.snapshot["world_sharing"]==true {6} else {5};
-        let rows=(buttons+2)/3;
-        let game_height=(h-16.0).max(100.0);
-        for i in 0..buttons {
-            let bx=x + 8.0 + (i%3) as f32 * (width - 16.0) / 3.0;
-            let by=y + game_height - 66.0 - (rows - 1 - i/3) as f32 * 22.0;
-            let bw=(width - 20.0) / 3.0;
-            if ui::hovered(self.cursor,bx,by,bw,18.0) {
-                match i {
-                    0 => {
+                    3 => self.vis_ui.emit(json!({"type":"voice","action":"deafen"})),
+                    4 => {
                         let action = if self.vis_ui.snapshot["voice"]["connected"] == true {
                             "leave"
                         } else {
@@ -493,84 +607,98 @@ impl Game<'_> {
                         };
                         self.vis_ui.emit(json!({"type":"voice","action":action}));
                     }
-                    1 => {
-                        if !self.vis_ui.selected.is_empty() {
-                            self.vis_ui.emit(json!({"type":"invite","to":self.vis_ui.selected}));
-                        }
-                    }
-                    2 => {
-                        let next = match self.vis_ui.snapshot["presence"].as_str() {
-                            Some("online") => "away",
-                            Some("away") => "busy",
-                            Some("busy") => "invisible",
-                            _ => "online",
-                        };
-                        self.vis_ui.emit(json!({"type":"presence","value":next,"custom_status":self.vis_ui.draft}));
-                    }
-                    3 => {
+                    5 => self
+                        .vis_ui
+                        .emit(json!({"type":"invite","to":self.vis_ui.selected})),
+                    6 => self.vis_ui.searching = !self.vis_ui.searching,
+                    7 => {
                         let next = if self.vis_ui.snapshot["voice"]["mode"] == "open" {
                             "ptt"
                         } else {
                             "open"
                         };
-                        self.vis_ui.emit(json!({"type":"voice","action":"mode","value":next}));
+                        self.vis_ui
+                            .emit(json!({"type":"voice","action":"mode","value":next}));
                     }
-                    4 => self.vis_ui.emit(json!({"type":"voice","action":"settings"})),
-                    _ => self.vis_ui.emit(json!({"type":"stop"})),
+                    8 => self
+                        .vis_ui
+                        .emit(json!({"type":"voice","action":"settings"})),
+                    _ => {
+                        if self.vis_ui.snapshot["world_sharing"] == true {
+                            self.vis_ui.emit(json!({"type":"stop"}));
+                        } else {
+                            self.vis_send();
+                        }
+                    }
                 }
                 return;
             }
         }
-        let left = (width * 0.35).min(150.0);
+        if p.compact() || self.vis_ui.snapshot["connected"] != true {
+            return;
+        }
         if let Some(invites) = self.vis_ui.snapshot["invitations"].as_array() {
-            let action = invites
-                .iter()
-                .take(2)
-                .enumerate()
-                .find(|(i, _)| {
-                    ui::hovered(
-                        self.cursor,
-                        x + left + 6.0,
-                        y + 62.0 + *i as f32 * 20.0,
-                        width - left - 12.0,
-                        18.0,
-                    )
-                })
-                .map(|(_, v)| v["id"].clone());
-            if let Some(id) = action {
-                let action = if self.cursor.0 >= x + left + 6.0 + (width - left - 16.0) / 2.0 + 2.0
-                {
-                    "decline"
-                } else {
-                    "join"
-                };
-                self.vis_ui.emit(json!({"type":action,"id":id}));
+            let tx = p.chat_x();
+            let width = p.w - p.left - 20.;
+            let picked = invites.iter().take(2).enumerate().find_map(|(i, invite)| {
+                for j in 0..2 {
+                    if (j == 1 || self.title.is_some())
+                        && ui::hovered(
+                            self.cursor,
+                            tx + j as f32 * width / 2.,
+                            p.y + 75. + i as f32 * 20.,
+                            width / 2. - 2.,
+                            18.,
+                        )
+                    {
+                        return Some((invite["id"].clone(), j));
+                    }
+                }
+                None
+            });
+            if let Some((id, j)) = picked {
+                self.vis_ui
+                    .emit(json!({"type":if j==0{"join"}else{"decline"},"id":id}));
                 return;
             }
         }
-
-        let rows = (((h - 16.0).max(100.0) - 110.0) / 20.0).max(0.0) as usize;
         if let Some(friends) = self.vis_ui.snapshot["friends"].as_array() {
-            for (i, f) in friends
+            let picked = friends
                 .iter()
                 .skip(self.vis_ui.friend_offset)
-                .take(rows)
+                .take(p.rows())
                 .enumerate()
-            {
-                if ui::hovered(
-                    self.cursor,
-                    x + 8.0,
-                    y + 48.0 + i as f32 * 20.0,
-                    left - 10.0,
-                    18.0,
-                ) {
-                    self.vis_ui.chat_offset = 0;
-                    self.vis_ui.selected = f["username"].as_str().unwrap_or("").to_owned();
-                    return;
-                }
+                .find_map(|(i, f)| {
+                    let [x, y, w, h] = p.row(i);
+                    ui::hovered(self.cursor, x, y, w, h)
+                        .then(|| f["username"].as_str().unwrap_or("").to_owned())
+                });
+            if let Some(user) = picked {
+                self.vis_ui.selected = user;
+                self.vis_ui.chat_offset = 0;
+                self.vis_ui.draft.clear();
+                self.vis_ui
+                    .emit(json!({"type":"select","username":self.vis_ui.selected}));
             }
         }
     }
+    fn vis_send(&mut self) {
+        if self.vis_ui.snapshot["connected"] == true
+            && !self.vis_ui.selected.is_empty()
+            && !self.vis_ui.draft.trim().is_empty()
+        {
+            self.vis_ui
+                .emit(json!({"type":"send","to":self.vis_ui.selected,"body":self.vis_ui.draft}));
+            self.vis_ui.draft.clear();
+        }
+    }
+}
+fn fit(atlas: &horizon_client::hud::HudAtlas, text: &str, width: f32) -> String {
+    let mut result = text.chars().take(160).collect::<String>();
+    while !result.is_empty() && HudBatch::text_width(atlas, &result) > width.max(0.) {
+        result.pop();
+    }
+    result
 }
 
 impl Game<'_> {
