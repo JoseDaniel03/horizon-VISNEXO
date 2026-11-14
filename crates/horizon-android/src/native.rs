@@ -1,6 +1,7 @@
 //! Android host only: all gameplay, rendering, saves and network packets come from PC's crate.
 use jni::{JavaVM, objects::{JObject, JString, JValue}};
 use serde::Deserialize;
+use base64::Engine;
 use std::{path::{Path, PathBuf}, sync::OnceLock};
 use winit::platform::android::activity::AndroidApp;
 static HOME: OnceLock<PathBuf> = OnceLock::new();
@@ -30,6 +31,32 @@ fn launch(app: &AndroidApp) -> Option<Launch> {
         Ok(valid.then_some(request))
     }).ok().flatten()
 }
+/// Optional public VIS skin (no credentials) from Nexo Android. The actual
+/// identity handoff remains schema-1 and independently validated.
+fn launcher_skin(app:&AndroidApp)->Option<Vec<u8>>{
+    let vm=unsafe{JavaVM::from_raw(app.vm_as_ptr().cast())}.ok()?;
+    let mut env=vm.attach_current_thread().ok()?;
+    env.with_local_frame(12,|env|->jni::errors::Result<Option<Vec<u8>>>{
+        let activity=unsafe{JObject::from_raw(app.activity_as_ptr().cast())};
+        let intent=env.call_method(&activity,"getIntent","()Landroid/content/Intent;",&[])?.l()?;
+        let key=JObject::from(env.new_string("vis_nexo_skin")?);
+        let value=env.call_method(&intent,"getStringExtra",
+            "(Ljava/lang/String;)Ljava/lang/String;",&[JValue::Object(&key)])?.l()?;
+        if value.is_null(){return Ok(None);}
+        let text:String=env.get_string(&JString::from(value))?.into();
+        if text.len()>87500||!text.starts_with("data:image/png;base64,"){return Ok(None);}
+        let raw=&text["data:image/png;base64,".len()..];
+        let decoded=match base64::engine::general_purpose::STANDARD.decode(raw){
+            Ok(v)=>v,Err(_)=>return Ok(None)
+        };
+        if decoded.len()<33||decoded.len()>65536
+            ||!decoded.starts_with(&[137,80,78,71,13,10,26,10])
+            ||&decoded[12..16]!=b"IHDR"{
+            return Ok(None);
+        }
+        Ok(Some(decoded))
+    }).ok().flatten()
+}
 fn prepare(root:&Path)->std::result::Result<(),String>{
     let home=HOME.get().ok_or("Android home missing")?;
     let marker=root.join("vis-engine-commit");
@@ -42,6 +69,13 @@ fn android_main(app:AndroidApp){
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("VIS-McRust"));
     let Some(home)=app.internal_data_path() else{return;};
     let Some(request)=launch(&app) else {log::error!("Missing or incompatible Nexo engine handoff");return;};
+    // Load public VIS cosmetic into Horizon's existing offline-player skin
+    // lookup before any game state starts. Signed premium textures take priority.
+    if let Some(skin)=launcher_skin(&app){
+        if let Err(reason)=horizon_client::skins::install_vis_offline_skin(&skin,"classic"){
+            log::warn!("Rejected optional VIS skin: {reason}");
+        }
+    }
     let game=home.join("vis-worlds").join(&request.owner).join(&request.instance);
     if let Err(error)=std::fs::create_dir_all(&game){log::error!("Game folder: {error}");return;}
     let copy=(||->std::io::Result<()>{
