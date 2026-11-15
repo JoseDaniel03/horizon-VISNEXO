@@ -121,7 +121,7 @@ pub fn parse_camera_cue(payload: &str) -> Result<CameraCue,&'static str> {
 
 pub fn decode_string(data: &[u8], max:usize)->Result<&str,&'static str> {
     let mut result=0u32;
-    let mut offset=0;
+    let mut offset:usize=0;
     for i in 0..5 {
         let b=*data.get(i).ok_or("Incomplete Minecraft VarInt")?;
         if i==4 && b>0x0f {return Err("VarInt overflow");}
