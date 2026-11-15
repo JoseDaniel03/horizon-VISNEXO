@@ -26,9 +26,15 @@ use horizon_platform::hooks::{self, Activity, Dimension, GameMode, Hooks, Play};
 use horizon_platform::pages::{Act, Label, Page, Place, Row};
 use horizon_platform::settings::Store;
 
-/// The "Horizon" application on Discord's developer portal (public: it names the game). Its
-/// Rich Presence assets: `horizon`, the logo.
-pub const DISCORD_APP_ID: &str = "1563857609738690560";
+/// Public VIS application identity, supplied by the release configuration.
+/// No Discord bot/OAuth token is needed for the local Rich Presence protocol.
+pub const DISCORD_APP_ID: &str = match option_env!("VIS_DISCORD_APPLICATION_ID") {
+    Some(value) => value,
+    None => "",
+};
+fn configured_application() -> bool {
+    (17..=20).contains(&DISCORD_APP_ID.len()) && DISCORD_APP_ID.bytes().all(|b| b.is_ascii_digit())
+}
 /// Whether the application has the game-mode images (`survival`, `creative`, `adventure`,
 /// `spectator`) beside the logo; it doesn't yet.
 const MODE_IMAGES: bool = false;
@@ -247,6 +253,10 @@ static THREAD: OnceLock<Thread> = OnceLock::new();
 /// The status [`set`] gave before, the switch included, is the first one sent.
 pub fn start(automated: bool) {
     let fake_discord = std::env::var_os(IPC_DIR_ENV).is_some();
+    if !fake_discord && !configured_application() {
+        log::info!("VIS Nexo: Discord application ID is not configured");
+        return;
+    }
     if THREAD.get().is_some()
         || std::env::var_os("HORIZON_NO_DISCORD").is_some_and(|v| v != "0")
         || (automated && !fake_discord)
@@ -358,7 +368,8 @@ fn run() {
 
 /// The activity Discord shows for `status`; `None` clears it.
 fn activity(status: Status, since: Option<u64>) -> Option<Value> {
-    let mut assets = json!({"large_image": "horizon", "large_text": "Horizon"});
+    let mut assets =
+        json!({"large_image": "vis_nexo", "large_text": horizon_platform::CLIENT_NAME});
     let (details, state, party) = match status {
         Status::Off => return None,
         Status::Menus => ("In the menus", None, None),
@@ -399,7 +410,7 @@ fn activity(status: Status, since: Option<u64>) -> Option<Value> {
     }
     if let Some((players, max)) = party {
         a["party"] = json!({
-            "id": format!("horizon-{}", std::process::id()),
+            "id": format!("vis-nexo-{}", std::process::id()),
             "size": [players.clamp(1, max), max],
         });
     }
@@ -649,7 +660,7 @@ mod tests {
         let menus = activity(Status::Menus, None).unwrap();
         assert_eq!(menus["details"], "In the menus");
         assert!(menus.get("state").is_none() && menus.get("timestamps").is_none());
-        assert_eq!(menus["assets"]["large_image"], "horizon");
+        assert_eq!(menus["assets"]["large_image"], "vis_nexo");
 
         let single = activity(world(Play::Singleplayer, Dimension::Nether), Some(1000)).unwrap();
         assert_eq!(single["details"], "Singleplayer");

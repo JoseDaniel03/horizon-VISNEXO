@@ -8,16 +8,14 @@ pub(super) struct Panel {
     pub left: f32,
 }
 impl Panel {
-    pub fn new(w: f32, h: f32, origin: Option<(f32, f32)>) -> Self {
-        let width = (w - 16.).clamp(1., 560.);
-        let height = (h - 16.).max(1.);
-        let (x, y) = origin.unwrap_or(((w - width) / 2., 8.));
+    pub fn new(w: f32, h: f32) -> Self {
+        let width = (w - 16.).clamp(1., 640.);
         Self {
-            x: x.clamp(0., (w - width).max(0.)),
-            y: y.clamp(0., (h - height).max(0.)),
+            x: (w - width) / 2.,
+            y: 0.,
             w: width,
-            h: height,
-            left: (width * 0.36).min(180.),
+            h: h.max(1.),
+            left: (width * 0.40).min(240.),
         }
     }
     pub fn compact(self) -> bool {
@@ -61,9 +59,9 @@ impl Panel {
 mod tests {
     use super::*;
     #[test]
-    fn moved_panel_keeps_controls_in_the_same_place() {
-        let p = Panel::new(800., 340., Some((87., 16.)));
-        assert_eq!(p.top(0)[1], 52.);
+    fn screen_keeps_native_buttons_inside_the_viewport() {
+        let p = Panel::new(800., 340.);
+        assert_eq!(p.top(0)[1], 36.);
         for i in 0..6 {
             let [x, y, w, h] = p.action(i);
             assert!(x >= p.x && y >= p.y);
@@ -73,7 +71,7 @@ mod tests {
     #[test]
     fn narrow_panel_never_extends_outside_viewport() {
         for (w, h) in [(160., 120.), (320., 240.), (1920., 1080.)] {
-            let p = Panel::new(w, h, Some((900., 900.)));
+            let p = Panel::new(w, h);
             assert!(p.x + p.w <= w && p.y + p.h <= h);
         }
     }

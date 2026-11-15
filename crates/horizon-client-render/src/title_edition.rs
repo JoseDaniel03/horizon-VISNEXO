@@ -488,3 +488,12 @@ mod tests {
         assert!(rust_edition(w, h, &edited).is_none());
     }
 }
+
+/// Distribution label shown beside the unchanged Minecraft compatibility version.
+pub fn distribution_version() -> String {
+    format!(
+        "{} {} (Rust)",
+        horizon_core::CLIENT_NAME,
+        horizon_core::VANILLA_VERSION
+    )
+}

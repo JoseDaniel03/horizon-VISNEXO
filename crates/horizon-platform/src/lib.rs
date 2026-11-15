@@ -11,6 +11,7 @@
 /// memory.
 pub use horizon_system as system;
 
+pub use horizon_core::CLIENT_NAME;
 /// The pinned Minecraft version: its id, protocol and data version.
 pub use horizon_core::version;
 

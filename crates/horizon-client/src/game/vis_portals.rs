@@ -25,8 +25,6 @@ pub(super) struct State {
     search: String,
     searching: bool,
     pub run_world: bool,
-    origin: Option<(f32, f32)>,
-    drag: Option<(f32, f32)>,
     notice: Option<std::time::Instant>,
     last_notice: String,
     pub received: Option<std::time::Instant>,
@@ -101,8 +99,8 @@ impl Game<'_> {
         }
         if self.screen == Screen::Friends {
             let (w, h) = self.gui_size();
-            let panel = Panel::new(w, h, self.vis_ui.origin);
-            let (x, y, width, height) = (panel.x, panel.y, panel.w, panel.h);
+            let panel = Panel::new(w, h);
+            let x = panel.x;
             match event {
                 WindowEvent::MouseWheel { delta, .. } => {
                     let amount = match delta {
@@ -131,34 +129,6 @@ impl Game<'_> {
                 WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
                     self.vis_ui.enter_text(text);
                     return true;
-                }
-                WindowEvent::MouseInput {
-                    state,
-                    button: winit::event::MouseButton::Left,
-                    ..
-                } => {
-                    if *state == ElementState::Pressed
-                        && ui::hovered(self.cursor, x, y, width, 32.0)
-                    {
-                        self.vis_ui.drag = Some((self.cursor.0 - x, self.cursor.1 - y));
-                        return true;
-                    }
-                    if *state == ElementState::Released && self.vis_ui.drag.take().is_some() {
-                        return true;
-                    }
-                }
-                WindowEvent::CursorMoved { position, .. } => {
-                    if let Some((dx, dy)) = self.vis_ui.drag {
-                        let scale = self.gui_scale().map_or(1.0, |g| g.scale);
-                        let px = position.x as f32 / scale;
-                        let py = position.y as f32 / scale;
-                        self.vis_ui.origin = Some((
-                            (px - dx).clamp(0.0, (w - width).max(0.0)),
-                            (py - dy).clamp(0.0, (h - height).max(0.0)),
-                        ));
-                        self.cursor = (px, py);
-                        return true;
-                    }
                 }
                 _ => {}
             }
@@ -250,13 +220,35 @@ impl Game<'_> {
         false
     }
     pub(super) fn draw_vis_portals(&mut self, batch: &mut HudBatch) {
-        let p = Panel::new(batch.width, batch.height, self.vis_ui.origin);
+        let p = Panel::new(batch.width, batch.height);
         let atlas = &self.gui.atlas;
         let connected = self.vis_ui.snapshot["connected"] == true;
-        widgets::begin_screen(|| widgets::ScreenInfo::new("vis-portals", "VIS Portals"));
-        batch.fill(atlas, p.x, p.y, p.w, p.h, rgba(13, 14, 19, 248));
-        batch.fill(atlas, p.x, p.y, p.w, 2., rgba(154, 134, 255, 255));
-        batch.text(atlas, "VIS PORTALS", p.x + 8., p.y + 9., u32::MAX, false);
+        let title = tr("vis.portals.title", "Play with friends");
+        widgets::begin_screen(|| widgets::ScreenInfo::new("vis-portals", title.clone()));
+        ui::menu_background(
+            batch,
+            atlas,
+            0.,
+            0.,
+            batch.width,
+            batch.height,
+            self.title.is_none(),
+        );
+        ui::separators(
+            batch,
+            atlas,
+            p.y + 58.,
+            p.y + p.h - 119.,
+            self.title.is_none(),
+        );
+        batch.text(
+            atlas,
+            &title,
+            (batch.width - HudBatch::text_width(atlas, &title)) / 2.,
+            p.y + 9.,
+            u32::MAX,
+            true,
+        );
         let identity = self.vis_ui.snapshot["account"]["display_name"]
             .as_str()
             .unwrap_or("");
@@ -314,7 +306,7 @@ impl Game<'_> {
             p.y + 62.,
             1.,
             p.h - 158.,
-            rgba(36, 38, 47, 255),
+            rgba(128, 128, 128, 255),
         );
         let count = self.vis_ui.snapshot["friends"]
             .as_array()
@@ -338,7 +330,7 @@ impl Game<'_> {
                 let user = f["username"].as_str().unwrap_or("");
                 let selected = user == self.vis_ui.selected;
                 if selected {
-                    batch.fill(atlas, x, y, w, h, rgba(40, 37, 58, 255));
+                    batch.fill(atlas, x, y, w, h, rgba(100, 100, 100, 140));
                 }
                 ui::button(
                     batch,
@@ -365,7 +357,13 @@ impl Game<'_> {
                 atlas,
                 &fit(
                     atlas,
-                    &tr("vis.portals.empty", "No friends to show"),
+                    &if self.vis_ui.received.is_none() {
+                        tr("vis.portals.waiting", "Waiting for Nexo…")
+                    } else if !connected {
+                        tr("vis.portals.offline_hint", "Connect your account in Nexo")
+                    } else {
+                        tr("vis.portals.empty", "No friends to show")
+                    },
                     p.left - 16.,
                 ),
                 p.x + 8.,
@@ -461,7 +459,7 @@ impl Game<'_> {
             p.y + p.h - 113.,
             chat_width,
             20.,
-            rgba(24, 26, 34, 255),
+            rgba(0, 0, 0, 180),
         );
         let input = if self.vis_ui.searching {
             &self.vis_ui.search
@@ -560,8 +558,12 @@ impl Game<'_> {
             (
                 6,
                 p.action(2),
-                tr("vis.portals.search", "Search friends"),
-                online,
+                if online {
+                    tr("vis.portals.search", "Search friends")
+                } else {
+                    tr("vis.portals.refresh", "Reconnect")
+                },
+                true,
             ),
             (
                 7,
@@ -588,7 +590,7 @@ impl Game<'_> {
     }
     pub(super) fn click_vis_portals(&mut self) {
         let (w, h) = self.gui_size();
-        let p = Panel::new(w, h, self.vis_ui.origin);
+        let p = Panel::new(w, h);
         for (id, [x, y, w, h], _, enabled) in self.vis_buttons(p) {
             if enabled && ui::hovered(self.cursor, x, y, w, h) {
                 match id {
@@ -610,7 +612,12 @@ impl Game<'_> {
                     5 => self
                         .vis_ui
                         .emit(json!({"type":"invite","to":self.vis_ui.selected})),
-                    6 => self.vis_ui.searching = !self.vis_ui.searching,
+                    6 => {
+                        self.vis_ui.emit(json!({"type":"refresh"}));
+                        if self.vis_ui.snapshot["connected"] == true {
+                            self.vis_ui.searching = !self.vis_ui.searching;
+                        }
+                    }
                     7 => {
                         let next = if self.vis_ui.snapshot["voice"]["mode"] == "open" {
                             "ptt"
