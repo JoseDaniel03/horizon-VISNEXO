@@ -3,12 +3,14 @@ on:
   push:
     paths:
       - 'integrations/vsclient-horizon/**'
+      - 'crates/horizon-client/Cargo.toml'
       - 'crates/horizon-client/src/mod_api.rs'
       - 'crates/horizon-client/tests/vsclient_native_port.rs'
       - '.github/workflows/visclient-native.yml'
   pull_request:
     paths:
       - 'integrations/vsclient-horizon/**'
+      - 'crates/horizon-client/Cargo.toml'
       - 'crates/horizon-client/src/mod_api.rs'
       - 'crates/horizon-client/tests/vsclient_native_port.rs'
       - '.github/workflows/visclient-native.yml'
