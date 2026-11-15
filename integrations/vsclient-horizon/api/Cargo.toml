@@ -1,0 +1,13 @@
+[package]
+name = "mod-vsclient-horizon"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+# Horizon rewrites this dependency to its own staged source during native-build.
+# The fork pin is a working development baseline; update it alongside the mixin.
+[dependencies]
+horizon-client = { git = "https://github.com/JoseDaniel03/horizon-VISNEXO", rev = "4ab9e7f88e86a760515861e980608275eb78b1d1" }
