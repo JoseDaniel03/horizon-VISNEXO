@@ -4,6 +4,7 @@ use std::time::Instant;
 
 pub const PROTOCOL: u32 = 8;
 pub const CHANNEL_HELLO: &str = "virgoland:hello";
+pub const CHANNEL_AUTH: &str = "virgoland:auth";
 pub const CHANNEL_CAMERA: &str = "virgoland:camera_v1";
 pub const CHANNEL_CINEMATIC: &str = "virgoland:cinematic_v3";
 pub const CHANNEL_INPUT: &str = "virgoland:input";
@@ -153,6 +154,16 @@ pub fn encode_string(s:&str)->Result<Vec<u8>,&'static str> {
     Ok(out)
 }
 /// Only advertise capabilities already backed by the Horizon native adapter.
+/// Send a short-lived one-use bridge ticket supplied by VIS Nexo. Never log,
+/// persist or expose it to camera packets. Restrict to a safe ASCII alphabet:
+/// the existing Java Bridge serializes the ticket into a JSON string.
+pub fn auth_ticket(ticket:&str) -> Result<Vec<u8>,&'static str> {
+    if ticket.is_empty() || ticket.len()>2048
+        || !ticket.bytes().all(|b|b.is_ascii_alphanumeric() || matches!(b,b'-'|b'_'|b'.')) {
+        return Err("Invalid launcher bridge ticket");
+    }
+    encode_string(&format!("8|{ticket}"))
+}
 pub fn hello() -> Vec<u8> {
     encode_string("8|0.1.0-mcrust|CAMERA_V1").expect("constant is safe")
 }
@@ -196,6 +207,15 @@ mod tests {
             vec![0xff,0xff,0xff,0xff,0xff,0],vec![1,0xff]] {
             assert!(decode_string(&value,8192).is_err(),"{value:?}");
         }
+    }
+    #[test]
+    fn launcher_ticket_is_validated_and_sent_in_legacy_auth_wire_format() {
+        assert_eq!(decode_string(&auth_ticket("short_LAUNCHER-ticket.1").unwrap(),MAX_WIRE_BYTES)
+            .unwrap(),"8|short_LAUNCHER-ticket.1");
+        for invalid in ["","token with spaces","\"injection", "a/b", "line\nbreak"] {
+            assert!(auth_ticket(invalid).is_err(),"{invalid:?}");
+        }
+        assert!(auth_ticket(&"x".repeat(2049)).is_err());
     }
     #[test]
     fn camera_cue_interpolates_and_wraps_yaw() {
