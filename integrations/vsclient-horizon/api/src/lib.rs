@@ -24,6 +24,16 @@ impl Hooks for VsClientHorizon {
         _event: &mut ClientPlayerNetworkLoggingInEvent,
     ) {
         if let Ok(mut camera) = self.camera.lock() { camera.reset(); }
+        // VIS Nexo can supply an ephemeral one-use launcher ticket via the
+        // child process environment. Absent/invalid tickets are never faked;
+        // servers with launcher-auth.enabled=true will reject the session.
+        if let Ok(ticket) = std::env::var("VIS_NEXO_CLIENT_BRIDGE_TICKET") {
+            if let Ok(data) = core::auth_ticket(&ticket) {
+                let _ = host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
+                    channel: core::CHANNEL_AUTH.into(), data,
+                }));
+            }
+        }
         // The Java Bridge understands a Minecraft VarInt length-prefixed
         // UTF-8 string, not raw UTF-8 nor Horizon's own mod-net framing.
         // We only advertise CAMERA_V1 while cinematic_v3, keys and HUD are pending.
