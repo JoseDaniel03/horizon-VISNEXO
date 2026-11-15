@@ -32,7 +32,7 @@ fn download_cache(home: &Path) -> PathBuf {
         .get()
         .cloned()
         .unwrap_or_else(|| home.join(".local/downloads"))
-        .join(horizon_core::VANILLA_VERSION)
+        .join(horizon_platform::version::VANILLA_VERSION)
 }
 
 /// Earlier Android packages installed textures only. An audio-capable APK must
@@ -40,7 +40,7 @@ fn download_cache(home: &Path) -> PathBuf {
 pub fn ready(home: &Path) -> bool {
     let root = home
         .join(".local/horizon-client")
-        .join(horizon_core::VANILLA_VERSION);
+        .join(horizon_platform::version::VANILLA_VERSION);
     crate::resource_install::ready(home)
         && root.join("android-downloads-v2.json").is_file()
         && (!cfg!(feature = "audio") || root.join("audio-complete.json").is_file())
@@ -55,7 +55,7 @@ pub fn cleanup_download_cache(home: &Path) -> Result<()> {
     let root = fs::canonicalize(home)?;
     let cache = root
         .join(".local/downloads")
-        .join(horizon_core::VANILLA_VERSION);
+        .join(horizon_platform::version::VANILLA_VERSION);
     let metadata = match fs::symlink_metadata(&cache) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -79,7 +79,7 @@ fn cleanup_system_download_cache() -> Result<()> {
         return Ok(());
     }
     let root = fs::canonicalize(directory)?;
-    let cache = root.join(horizon_core::VANILLA_VERSION);
+    let cache = root.join(horizon_platform::version::VANILLA_VERSION);
     let metadata = match fs::symlink_metadata(&cache) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -349,7 +349,7 @@ pub fn install_with_progress(home: &Path, progress: impl Fn(InstallProgress) + S
     let _guard = INSTALLATION.lock().unwrap_or_else(|e| e.into_inner());
     let report = |stage, done, total| progress(InstallProgress { stage, done, total });
     report(InstallStage::Metadata, 0, 0);
-    let version = horizon_core::VANILLA_VERSION;
+    let version = horizon_platform::version::VANILLA_VERSION;
     let cache = download_cache(home);
     let legacy = home.join(".local/downloads").join(version);
     if cache != legacy && legacy.is_dir() && !cache.exists() {
@@ -572,7 +572,7 @@ mod tests {
         let cache = home
             .path()
             .join(".local/downloads")
-            .join(horizon_core::VANILLA_VERSION);
+            .join(horizon_platform::version::VANILLA_VERSION);
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("client.jar"), b"download input").unwrap();
         fs::create_dir_all(home.path().join("saves")).unwrap();
@@ -583,7 +583,7 @@ mod tests {
     fn mark_cache_install_ready(home: &Path) {
         let root = home
             .join(".local/horizon-client")
-            .join(horizon_core::VANILLA_VERSION);
+            .join(horizon_platform::version::VANILLA_VERSION);
         fs::create_dir_all(&root).unwrap();
         for marker in [
             "horizon-resources.json",
@@ -613,7 +613,7 @@ mod tests {
         assert!(
             home.path()
                 .join(".local/downloads")
-                .join(horizon_core::VANILLA_VERSION)
+                .join(horizon_platform::version::VANILLA_VERSION)
                 .join("client.jar")
                 .is_file()
         );
@@ -634,14 +634,14 @@ mod tests {
             !home
                 .path()
                 .join(".local/downloads")
-                .join(horizon_core::VANILLA_VERSION)
+                .join(horizon_platform::version::VANILLA_VERSION)
                 .exists()
         );
         assert!(home.path().join("saves/keep").is_file());
         assert!(
             home.path()
                 .join(".local/horizon-client")
-                .join(horizon_core::VANILLA_VERSION)
+                .join(horizon_platform::version::VANILLA_VERSION)
                 .join("prepared-data")
                 .is_file()
         );
@@ -655,7 +655,7 @@ mod tests {
         assert!(
             home.path()
                 .join(".local/downloads")
-                .join(horizon_core::VANILLA_VERSION)
+                .join(horizon_platform::version::VANILLA_VERSION)
                 .join("client.jar")
                 .is_file()
         );
@@ -671,7 +671,7 @@ mod tests {
             cache,
             android_cache
                 .join("minecraft-downloads")
-                .join(horizon_core::VANILLA_VERSION)
+                .join(horizon_platform::version::VANILLA_VERSION)
         );
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("client.jar"), b"download").unwrap();
@@ -684,7 +684,7 @@ mod tests {
             !home
                 .path()
                 .join(".local/downloads")
-                .join(horizon_core::VANILLA_VERSION)
+                .join(horizon_platform::version::VANILLA_VERSION)
                 .exists()
         );
         assert!(home.path().join("saves/keep").is_file());
@@ -698,7 +698,7 @@ mod tests {
         let cache = home
             .path()
             .join(".local/downloads")
-            .join(horizon_core::VANILLA_VERSION);
+            .join(horizon_platform::version::VANILLA_VERSION);
         fs::remove_dir_all(&cache).unwrap();
         std::os::unix::fs::symlink(home.path().join("saves"), &cache).unwrap();
         assert!(cleanup_download_cache(home.path()).is_err());

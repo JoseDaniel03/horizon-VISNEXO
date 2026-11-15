@@ -382,6 +382,11 @@ struct SoundCache {
 }
 const CACHE_BYTES: usize = 64 << 20;
 impl SoundCache {
+    fn trim(&mut self) {
+        self.entries.clear();
+        self.entries.shrink_to_fit();
+        self.bytes = 0;
+    }
     fn get(&mut self, key: &str) -> Option<Samples> {
         self.clock += 1;
         let entry = self.entries.get_mut(key)?;
@@ -2135,6 +2140,12 @@ impl Audio {
             .lock()
             .map_or((0, 0), |c| (c.entries.len(), c.bytes))
     }
+    /// Drop cache ownership of decoded buffers. Playing channels retain their samples.
+    pub fn trim_decoded_cache(&self) {
+        if let Ok(mut cache) = self.backend.cache.lock() {
+            cache.trim();
+        }
+    }
     /// Every sound event id (for command completion).
     /// The engine's table sizes and the mixer's channels (`status`).
     pub fn census(&self) -> serde_json::Value {
@@ -2425,6 +2436,17 @@ mod tests {
         // A failed load is remembered without counting.
         cache.insert("missing".into(), None);
         assert_eq!(cache.get("missing"), Some(None));
+    }
+    #[test]
+    fn memory_trim_keeps_playing_samples_alive_but_forgets_cache_entries() {
+        let mut cache = SoundCache::default();
+        let samples = Arc::new(vec![0.5f32; 32]);
+        cache.insert("playing".into(), Some((samples.clone(), 44100, 1)));
+        cache.trim();
+        assert!(cache.entries.is_empty());
+        assert_eq!(cache.bytes, 0);
+        assert_eq!(samples[0], 0.5);
+        assert_eq!(Arc::strong_count(&samples), 1);
     }
     #[test]
     fn output_stays_off_on_a_virtual_screen_unless_asked() {

@@ -19,10 +19,10 @@ pub struct Bundle {
 
 impl Bundle {
     pub fn validate(&self) -> Result<()> {
-        if self.version != horizon_core::VANILLA_VERSION {
+        if self.version != horizon_platform::version::VANILLA_VERSION {
             return Err(format!(
                 "This engine only implements Minecraft {}",
-                horizon_core::VANILLA_VERSION
+                horizon_platform::version::VANILLA_VERSION
             )
             .into());
         }
@@ -47,7 +47,7 @@ impl Bundle {
 
 pub fn ready(home: &Path) -> bool {
     home.join(".local/horizon-client")
-        .join(horizon_core::VANILLA_VERSION)
+        .join(horizon_platform::version::VANILLA_VERSION)
         .join("horizon-resources.json")
         .is_file()
 }
@@ -166,7 +166,7 @@ mod tests {
     fn serve(bytes: Vec<u8>) -> (Bundle, std::thread::JoinHandle<()>) {
         let server = TcpListener::bind("127.0.0.1:0").unwrap();
         let bundle = Bundle {
-            version: horizon_core::VANILLA_VERSION.into(),
+            version: horizon_platform::version::VANILLA_VERSION.into(),
             url: format!("http://{}/resources.zip", server.local_addr().unwrap()),
             sha256: format!("{:x}", Sha256::digest(&bytes)),
             size: bytes.len() as u64,
@@ -241,7 +241,7 @@ mod tests {
             size: 100,
         };
         assert!(bundle.validate().is_err());
-        bundle.version = horizon_core::VANILLA_VERSION.into();
+        bundle.version = horizon_platform::version::VANILLA_VERSION.into();
         assert!(bundle.validate().is_ok());
         bundle.url = "http://example.com/resources.zip".into();
         assert!(bundle.validate().is_err());

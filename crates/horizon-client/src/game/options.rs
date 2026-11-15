@@ -738,6 +738,8 @@ impl Game<'_> {
             return;
         }
         let limit = self.framerate_limit();
+        #[cfg(target_os = "android")]
+        let limit = crate::android::health::frame_cap(limit);
         match self.settings.horizon.pacing {
             horizon_client::graphics::Pacing::Precise => {
                 horizon_client::window::end_frame(&mut self.limiter, limit, &mut self.frame_clock)

@@ -162,7 +162,7 @@ fn android_main(app: AndroidApp) {
     // Load public VIS cosmetic into Horizon's existing offline-player skin
     // lookup before any game state starts. Signed premium textures take priority.
     if let Some(skin) = launcher_skin(&app) {
-        if let Err(reason) = horizon_client::skins::install_vis_offline_skin(&skin, "classic") {
+        if let Err(reason) = horizon_game::install_public_offline_skin(&skin, "classic") {
             log::warn!("Rejected optional VIS skin: {reason}");
         }
     }
@@ -189,7 +189,7 @@ fn android_main(app: AndroidApp) {
     }
     let resources = home
         .join(".local/horizon-client")
-        .join(horizon_core::VANILLA_VERSION);
+        .join(horizon_platform::version::VANILLA_VERSION);
     let mut args = vec![
         "--resources".into(),
         resources.to_string_lossy().into_owned(),
@@ -200,16 +200,16 @@ fn android_main(app: AndroidApp) {
         "--name".into(),
         request.name,
         "--fullscreen".into(),
-        "--render-distance".into(),
-        "6".into(),
     ];
     if !request.server.is_empty() {
         args.extend(["--server".into(), request.server]);
     }
     let _ = HOME.set(home);
-    horizon_client::android::initialize(app, args, prepare);
+    crate::health::initialize(app.clone());
+    horizon_game::android::health::initialize(crate::health::sample);
+    horizon_game::android::initialize(app, args, prepare);
     horizon_official::register();
-    horizon_client::entry::main();
+    horizon_game::main();
     // Winit owns one loop per process. Saving/shutdown completed before returning.
     std::process::exit(0);
 }

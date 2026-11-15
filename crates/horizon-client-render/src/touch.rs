@@ -210,7 +210,7 @@ impl TouchControls {
         self.pending.set(button, true);
     }
 
-    fn visible(&self, c: Control) -> bool {
+    pub fn visible(&self, c: Control) -> bool {
         let visibility = self.settings.button_visibility[c as usize];
         if c == Control::Shield
             && (!self.shield_available
@@ -244,7 +244,7 @@ impl TouchControls {
 
     /// Where a control is on this surface: the saved placement, scaled by
     /// `button_scale` and kept on screen.
-    fn placement(&self, c: Control) -> Placement {
+    pub fn placement(&self, c: Control) -> Placement {
         let aspect = self.aspect();
         let mut p = self.settings.placement(c);
         let factory_swap = c == Control::Offhand
@@ -492,6 +492,7 @@ impl TouchControls {
 
     /// Lets go of everything: fingers, latched presses, requests.
     pub fn clear(&mut self) {
+        self.key_events.clear();
         self.fingers.clear();
         self.last_sneak_tap = None;
         self.sprint_latched = false;
