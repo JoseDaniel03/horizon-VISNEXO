@@ -1,0 +1,12 @@
+# VSClient native for VIS MCRust / Horizon 26.3.
+# Build as a native trait mod. The launcher compiles it into this Horizon source,
+# never attempts to load Fabric .jar files into the Rust client.
+[mod]
+id = "vsclient"
+version = "0.1.0"
+
+[compatibility]
+horizon_revision = "4ab9e7f88e86a760515861e980608275eb78b1d1"
+
+[api]
+path = "api"
