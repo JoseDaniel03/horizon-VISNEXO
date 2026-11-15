@@ -10,6 +10,7 @@ el VSClient Fabric y sus servicios de servidor originales.
 | Función | MCRust |
 |---|---|
 | Protocolo 8, Minecraft VarInt + UTF-8 | Implementado y probado |
+| Canal virgoland:auth, ticket de una sesión VIS Nexo | Soporte de envío opcional; requiere que Nexo suministre el ticket |
 | Canal virgoland:hello; capacidades | Implementado: anuncia solo CAMERA_V1 |
 | Canal virgoland:camera_v1; 64 keyframes y revisión creciente | Implementado |
 | Cámara visual: posición, yaw, pitch | Hook nativo |
@@ -56,6 +57,21 @@ duplicar tipos Rust del paquete horizon-protocol.
    Reproducir una cámara, confirmar la expiración y desconexión sin efectos
    residuales, y verificar el comportamiento del servidor con cuentas.
 5. Hacer QA de FPS, cámara y render con jugador real antes de producción.
+
+## Autenticación opcional del Bridge
+
+Cuando el servidor usa launcher-auth.enabled=true, el Bridge de VSClient exige
+un ticket de una sola utilización expedido por la plataforma; mandar hello
+sin ticket NO autentica al jugador. El mod puede leer una variable privada del
+proceso del juego llamada VIS_NEXO_CLIENT_BRIDGE_TICKET y transmitirla por el
+canal virgoland:auth ANTES del hello, en protocolo 8.
+
+**VIS Nexo todavía debe obtener ese ticket del servicio autorizado y pasarlo
+al proceso MCRust**; esta entrega no crea, renueva ni almacena credenciales.
+Los tickets ausentes o inválidos se ignoran y un servidor con auth obligatoria
+rechazará la sesión; nunca se genera uno falso. El ticket no se registra en logs.
+No debe incluirse en repositorios ni comandos compartidos: Nexo debe inyectarlo
+directamente en el entorno de su proceso hijo y limitar su vida útil.
 
 ## Seguridad
 
