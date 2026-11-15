@@ -53,7 +53,7 @@ impl Hooks for VsClientHorizon {
         }
     }
 
-    fn compute_fov(&self, _host: &dyn Host, event: &mut ComputeFovEvent<'_>) {
+    fn compute_fov(&self, _host: &dyn Host, event: &mut ComputeFovEvent) {
         let Ok(mut camera) = self.camera.lock() else {return;};
         if let Some(pose) = camera.sample(Instant::now()) {
             event.degrees = pose.fov;
