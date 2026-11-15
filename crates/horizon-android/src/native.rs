@@ -120,6 +120,84 @@ fn launcher_skin(app: &AndroidApp) -> Option<Vec<u8>> {
     .ok()
     .flatten()
 }
+// Java host serializes management with the native game's lifetime.
+fn game_directory(app: &AndroidApp, owner: &str, instance: &str) -> Option<PathBuf> {
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
+    let mut env = vm.attach_current_thread().ok()?;
+    let result = env.with_local_frame(16, |env| -> jni::errors::Result<PathBuf> {
+        let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
+        let loader = env
+            .call_method(
+                &activity,
+                "getClassLoader",
+                "()Ljava/lang/ClassLoader;",
+                &[],
+            )?
+            .l()?;
+        let name = JObject::from(env.new_string("dev.horizon.android.VisGameStore")?);
+        let class = jni::objects::JClass::from(
+            env.call_method(
+                loader,
+                "loadClass",
+                "(Ljava/lang/String;)Ljava/lang/Class;",
+                &[JValue::Object(&name)],
+            )?
+            .l()?,
+        );
+        let owner = JObject::from(env.new_string(owner)?);
+        let instance = JObject::from(env.new_string(instance)?);
+        let value = env
+            .call_static_method(
+                class,
+                "begin",
+                "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&activity),
+                    JValue::Object(&owner),
+                    JValue::Object(&instance),
+                ],
+            )?
+            .l()?;
+        let text: String = env.get_string(&JString::from(value))?.into();
+        Ok(PathBuf::from(text))
+    });
+    let _ = env.exception_clear();
+    result.ok()
+}
+struct GameLease(AndroidApp);
+impl Drop for GameLease {
+    fn drop(&mut self) {
+        if let Ok(vm) = unsafe { JavaVM::from_raw(self.0.vm_as_ptr().cast()) } {
+            if let Ok(mut env) = vm.attach_current_thread() {
+                let result = (|| -> jni::errors::Result<()> {
+                    let activity = unsafe { JObject::from_raw(self.0.activity_as_ptr().cast()) };
+                    let loader = env
+                        .call_method(
+                            &activity,
+                            "getClassLoader",
+                            "()Ljava/lang/ClassLoader;",
+                            &[],
+                        )?
+                        .l()?;
+                    let name = JObject::from(env.new_string("dev.horizon.android.VisGameStore")?);
+                    let class = jni::objects::JClass::from(
+                        env.call_method(
+                            loader,
+                            "loadClass",
+                            "(Ljava/lang/String;)Ljava/lang/Class;",
+                            &[JValue::Object(&name)],
+                        )?
+                        .l()?,
+                    );
+                    env.call_static_method(class, "end", "()V", &[])?;
+                    Ok(())
+                })();
+                let _ = result;
+                let _ = env.exception_clear();
+            }
+        }
+    }
+}
 fn prepare(root: &Path) -> std::result::Result<(), String> {
     let home = HOME.get().ok_or("Android home missing")?;
     let marker = root.join("vis-engine-commit");
@@ -166,14 +244,11 @@ fn android_main(app: AndroidApp) {
             log::warn!("Rejected optional VIS skin: {reason}");
         }
     }
-    let game = home
-        .join("vis-worlds")
-        .join(&request.owner)
-        .join(&request.instance);
-    if let Err(error) = std::fs::create_dir_all(&game) {
-        log::error!("Game folder: {error}");
+    let Some(game) = game_directory(&app, &request.owner, &request.instance) else {
+        log::error!("Instance storage unavailable or game already running");
         return;
-    }
+    };
+    let _lease = GameLease(app.clone());
     let copy = (|| -> std::io::Result<()> {
         let mut data = app
             .asset_manager()

@@ -162,6 +162,8 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
       - name: Prepare engine tables with this fork's exporter
         run: python3 tools/android_prepare.py --java-home "$JAVA_HOME_25_X64"
+      - name: Test sandboxed Android world management
+        run: python3 -m unittest discover -s tools -p test_android_world_store.py
       - name: Build and audit signed native APK
         env:
           VIS_ANDROID_KEYSTORE_B64: ${{ secrets.VIS_MCRUST_ANDROID_KEYSTORE_B64 }}

@@ -18,6 +18,8 @@ jobs:
           targets: aarch64-linux-android
       - name: Check three-platform release contract
         run: python3 -m unittest discover -s tools -p test_vis_mcrust_release.py
+      - name: Test sandboxed Android world management
+        run: python3 -m unittest discover -s tools -p test_android_world_store.py
       - name: Test Android runtime policy
         run: |
           rustc --edition 2024 --test crates/horizon-client-render/src/android_policy.rs -o /tmp/android-policy-tests
