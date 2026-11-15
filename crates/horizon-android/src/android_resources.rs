@@ -180,8 +180,10 @@ pub fn controls_with_progress(root: &Path, progress: impl Fn(u64, u64)) -> Resul
                 entry["source"].as_str().ok_or("Missing control source")?
             )
         };
-        let url =
-            format!("https://raw.githubusercontent.com/Mojang/bedrock-samples/{revision}/{source}");
+        let url = format!(
+            "{}/{revision}/{source}",
+            horizon_addresses::MOJANG_BEDROCK_SAMPLES
+        );
         let mut bytes = Vec::new();
         agent
             .get(&url)

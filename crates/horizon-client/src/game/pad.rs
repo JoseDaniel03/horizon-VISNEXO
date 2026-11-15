@@ -375,12 +375,13 @@ impl Game<'_> {
                     renderer.trim_staging_memory();
                 }
             }
-            if self.android_editor.is_some() {
+            if self.android_touch.editor.is_some() {
                 return;
             }
             self.settings.controller.enabled = true;
             self.pad.feed = Some(
                 self.android_touch
+                    .controls
                     .poll_state()
                     .merge(&horizon_client_render::android_runtime::pad_state()),
             );

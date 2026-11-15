@@ -855,3 +855,27 @@ mod controller_context_tests {
         );
     }
 }
+
+#[cfg(not(target_os = "android"))]
+pub(super) fn platform_settings(path: &std::path::Path) -> horizon_client::settings::Settings {
+    horizon_client::settings::Settings::load(path)
+}
+/// First-run platform defaults; later launches preserve the player's choices.
+#[cfg(target_os = "android")]
+pub(super) fn platform_settings(path: &std::path::Path) -> horizon_client::settings::Settings {
+    let mut early_settings = horizon_client::settings::Settings::load(path);
+    #[cfg(target_os = "android")]
+    if !path.exists() {
+        let profile = crate::android::health::profile();
+        early_settings.render_distance = profile.distance;
+        early_settings.simulation_distance = profile.distance.min(6);
+        early_settings.max_fps = 60;
+        early_settings.horizon.resolution_scale = profile.scale;
+        early_settings.horizon.dynamic_resolution = true;
+        early_settings.horizon.target_fps = 60;
+        early_settings.horizon.texture_budget_mib = profile.textures_mib;
+        early_settings.horizon.upload_budget_kib = profile.uploads_kib;
+        log::info!("Android initial profile: {profile:?}");
+    }
+    early_settings
+}

@@ -2373,11 +2373,7 @@ struct Game<'a> {
     /// Controllers (Horizon's own).
     pad: pad::Pads,
     #[cfg(target_os = "android")]
-    android_touch: horizon_client_render::touch::TouchControls,
-    #[cfg(target_os = "android")]
-    android_editor: Option<android_touch::Editor>,
-    #[cfg(target_os = "android")]
-    android_menu_finger: Option<u64>,
+    android_touch: android_touch::State,
     #[cfg(target_os = "android")]
     android_suspended: bool,
     frames: u64,
@@ -11610,10 +11606,6 @@ impl<'a> Game<'a> {
             #[cfg(target_os = "android")]
             android_touch: android_touch::controls(),
             #[cfg(target_os = "android")]
-            android_editor: None,
-            #[cfg(target_os = "android")]
-            android_menu_finger: None,
-            #[cfg(target_os = "android")]
             android_suspended: false,
             frames: 0,
             glint_frame: Default::default(),
@@ -12399,13 +12391,7 @@ pub fn run_with() -> Result<()> {
     horizon_world::datafix::set_resources(
         &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
     );
-    #[cfg(target_os = "android")]
-    let downloading = crate::android::has_resource_installer();
-    #[cfg(not(target_os = "android"))]
-    let downloading = false;
-    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game())
-        .filter(|_| !downloading)
-    {
+    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()) {
         // The game build started by hand (the release's zip), not by the
         // launcher: a window says where to get it. Scripts and servers get
         // the error.
@@ -12428,20 +12414,7 @@ pub fn run_with() -> Result<()> {
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models();
     mods::register_layer_definitions();
-    let mut early_settings = Settings::load(&Game::options_path());
-    #[cfg(target_os = "android")]
-    if !Game::options_path().exists() {
-        let profile = crate::android::health::profile();
-        early_settings.render_distance = profile.distance;
-        early_settings.simulation_distance = profile.distance.min(6);
-        early_settings.max_fps = 60;
-        early_settings.horizon.resolution_scale = profile.scale;
-        early_settings.horizon.dynamic_resolution = true;
-        early_settings.horizon.target_fps = 60;
-        early_settings.horizon.texture_budget_mib = profile.textures_mib;
-        early_settings.horizon.upload_budget_kib = profile.uploads_kib;
-        log::info!("Android initial profile: {profile:?}");
-    }
+    let mut early_settings = options::platform_settings(&Game::options_path());
     // The player's Polytone pack options (#11486), before any pack is read.
     horizon_client::packs::set_polytone_choices(horizon_client::packs::load_polytone_choices(
         &horizon_client::packs::polytone_choices_file(),

@@ -132,9 +132,10 @@ def main():
     java_home = args.java_home or download_jdk(manifest, private / 'jdk')
     environment = dict(os.environ, JAVA_HOME=str(java_home.resolve()))
     isolated = Path(tempfile.mkdtemp(prefix='prepare-', dir=private))
-    for key in ['HORIZON_HOME', 'HORIZON_LAUNCHER_HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME']:
-        environment[key] = str(isolated / key.lower())
-    environment.update(HORIZON_LAUNCHER_NO_SELF_UPDATE='1', HORIZON_NO_AUDIO='1')
+    environment = lab.game_env(environment,
+        HORIZON_HOME=isolated / 'horizon',
+        HORIZON_LAUNCHER_HOME=isolated / 'launcher',
+        XDG_DATA_HOME=isolated / 'data', XDG_CONFIG_HOME=isolated / 'config')
     subprocess.run(['cargo', 'run', '-p', 'horizon-prepare', '--', '--root', str(ROOT), '--prepare',
                     '--minecraft-dir', str(minecraft), '--server-jar', str(server)],
                    cwd=ROOT, env=environment, check=True)

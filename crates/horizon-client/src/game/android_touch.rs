@@ -5,10 +5,19 @@ use horizon_client_render::touch::{
     layout::{Control, Settings},
 };
 use winit::event::{Touch, TouchPhase};
-pub(super) fn controls() -> TouchControls {
+pub(super) struct State {
+    pub controls: TouchControls,
+    pub editor: Option<Editor>,
+    pub menu_finger: Option<u64>,
+}
+pub(super) fn controls() -> State {
     let mut controls = TouchControls::default();
     controls.settings = Settings::load(&Game::options_path().with_file_name("vis-touch.json"));
-    controls
+    State {
+        controls,
+        editor: None,
+        menu_finger: None,
+    }
 }
 
 pub(super) struct Editor {
@@ -19,25 +28,25 @@ pub(super) struct Editor {
 
 impl Game<'_> {
     pub(super) fn android_cancel_editor(&mut self) {
-        if let Some(editor) = self.android_editor.take() {
-            self.android_touch.settings = editor.original;
+        if let Some(editor) = self.android_touch.editor.take() {
+            self.android_touch.controls.settings = editor.original;
         }
-        self.android_touch.clear();
+        self.android_touch.controls.clear();
         self.screen = Screen::Playing;
         self.capture(true);
     }
     fn android_touch_requests(&mut self) {
         for (requested, key) in [
             (
-                std::mem::take(&mut self.android_touch.chat_requested),
+                std::mem::take(&mut self.android_touch.controls.chat_requested),
                 KeyCode::KeyT,
             ),
             (
-                std::mem::take(&mut self.android_touch.debug_requested),
+                std::mem::take(&mut self.android_touch.controls.debug_requested),
                 KeyCode::F3,
             ),
             (
-                std::mem::take(&mut self.android_touch.perspective_requested),
+                std::mem::take(&mut self.android_touch.controls.perspective_requested),
                 KeyCode::F5,
             ),
         ] {
@@ -45,20 +54,20 @@ impl Game<'_> {
                 log::warn!("Android shortcut: {error}");
             }
         }
-        for (token, down) in self.android_touch.key_events() {
+        for (token, down) in self.android_touch.controls.key_events() {
             if down && token == "action:key.swapOffhand" {
                 if let Err(error) = self.key_pressed(KeyCode::KeyF, KeyCode::KeyF) {
                     log::warn!("Android offhand: {error}");
                 }
             }
         }
-        if std::mem::take(&mut self.android_touch.settings_requested) {
-            self.android_editor = Some(Editor {
-                original: self.android_touch.settings.clone(),
+        if std::mem::take(&mut self.android_touch.controls.settings_requested) {
+            self.android_touch.editor = Some(Editor {
+                original: self.android_touch.controls.settings.clone(),
                 drag: None,
                 selected: Control::Move,
             });
-            self.android_touch.clear();
+            self.android_touch.controls.clear();
             self.screen = Screen::Paused;
             self.capture(false);
             self.pause = self.pauses_game();
@@ -75,13 +84,16 @@ impl Game<'_> {
             touch.location.x as f32 / size.width.max(1) as f32,
             touch.location.y as f32 / size.height.max(1) as f32,
         ];
-        self.android_touch.viewport(size.width, size.height);
+        self.android_touch
+            .controls
+            .viewport(size.width, size.height);
         if touch.phase == TouchPhase::Started && point[1] < 0.12 {
             let action = (point[0].clamp(0., 0.999) * 8.) as usize;
             match action {
                 0 => {
                     if let Err(error) = self
                         .android_touch
+                        .controls
                         .settings
                         .save(&Self::options_path().with_file_name("vis-touch.json"))
                     {
@@ -89,41 +101,41 @@ impl Game<'_> {
                         self.error = Some(error.into());
                         return;
                     }
-                    self.android_editor = None;
+                    self.android_touch.editor = None;
                 }
                 1 => {
-                    if let Some(editor) = self.android_editor.take() {
-                        self.android_touch.settings = editor.original;
+                    if let Some(editor) = self.android_touch.editor.take() {
+                        self.android_touch.controls.settings = editor.original;
                     }
                 }
-                2 => self.android_touch.settings = Settings::default(),
+                2 => self.android_touch.controls.settings = Settings::default(),
                 3 | 4 => {
-                    let editor = self.android_editor.as_ref().unwrap();
-                    let mode = self.android_touch.settings.mode.index();
-                    let slot = self.android_touch.settings.slot(editor.selected);
-                    let place = &mut self.android_touch.settings.layouts[mode][slot];
+                    let editor = self.android_touch.editor.as_ref().unwrap();
+                    let mode = self.android_touch.controls.settings.mode.index();
+                    let slot = self.android_touch.controls.settings.slot(editor.selected);
+                    let place = &mut self.android_touch.controls.settings.layouts[mode][slot];
                     place.size =
                         (place.size + if action == 3 { -0.01 } else { 0.01 }).clamp(0.04, 0.5);
                 }
                 5 | 6 => {
-                    let s = &mut self.android_touch.settings;
+                    let s = &mut self.android_touch.controls.settings;
                     s.sensitivity =
                         (s.sensitivity + if action == 5 { -0.1 } else { 0.1 }).clamp(0.1, 4.0);
                 }
                 7 => {
-                    self.android_touch.settings.left_handed =
-                        !self.android_touch.settings.left_handed
+                    self.android_touch.controls.settings.left_handed =
+                        !self.android_touch.controls.settings.left_handed
                 }
                 _ => {}
             }
-            if self.android_editor.is_none() {
-                self.android_touch.clear();
+            if self.android_touch.editor.is_none() {
+                self.android_touch.controls.clear();
                 self.screen = Screen::Playing;
                 self.capture(true);
             }
             return;
         }
-        let Some(editor) = self.android_editor.as_mut() else {
+        let Some(editor) = self.android_touch.editor.as_mut() else {
             return;
         };
         if touch.phase == TouchPhase::Started {
@@ -132,9 +144,9 @@ impl Game<'_> {
                 .into_iter()
                 .rev()
                 .find(|&c| {
-                    self.android_touch.settings.visible(c)
+                    self.android_touch.controls.settings.visible(c)
                         && horizon_client_render::touch::layout::contains(
-                            self.android_touch.placement(c).rect(aspect),
+                            self.android_touch.controls.placement(c).rect(aspect),
                             point,
                         )
                 })
@@ -147,15 +159,15 @@ impl Game<'_> {
             && finger == touch.id
         {
             if touch.phase == TouchPhase::Moved {
-                let mode = self.android_touch.settings.mode.index();
+                let mode = self.android_touch.controls.settings.mode.index();
                 // Placement coordinates are stored before the optional mirror.
-                let x = if self.android_touch.settings.left_handed {
+                let x = if self.android_touch.controls.settings.left_handed {
                     1.0 - point[0]
                 } else {
                     point[0]
                 };
-                self.android_touch.settings.layouts[mode]
-                    [self.android_touch.settings.slot(control)]
+                self.android_touch.controls.settings.layouts[mode]
+                    [self.android_touch.controls.settings.slot(control)]
                 .center = [x.clamp(0.04, 0.96), point[1].clamp(0.16, 0.94)];
             }
             if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
@@ -173,7 +185,7 @@ impl Game<'_> {
         touch: Touch,
         origin: input_trace::InputOrigin,
     ) {
-        if self.android_editor.is_some() {
+        if self.android_touch.editor.is_some() {
             self.android_edit_touch(&touch);
             return;
         }
@@ -205,8 +217,10 @@ impl Game<'_> {
             }
             if let Some(window) = &self.window {
                 let size = window.inner_size();
-                self.android_touch.viewport(size.width, size.height);
-                let delta = self.android_touch.update(
+                self.android_touch
+                    .controls
+                    .viewport(size.width, size.height);
+                let delta = self.android_touch.controls.update(
                     touch.id,
                     [
                         touch.location.x as f32 / size.width.max(1) as f32,
@@ -219,17 +233,17 @@ impl Game<'_> {
                     delta,
                     size.width,
                     size.height,
-                    &self.android_touch.settings,
+                    &self.android_touch.controls.settings,
                 );
                 self.look_turn(f64::from(delta[0]), f64::from(delta[1]));
                 self.android_touch_requests();
             }
         } else {
-            self.android_touch.clear();
-            if touch.phase == TouchPhase::Started && self.android_menu_finger.is_none() {
-                self.android_menu_finger = Some(touch.id);
+            self.android_touch.controls.clear();
+            if touch.phase == TouchPhase::Started && self.android_touch.menu_finger.is_none() {
+                self.android_touch.menu_finger = Some(touch.id);
             }
-            if self.android_menu_finger != Some(touch.id) {
+            if self.android_touch.menu_finger != Some(touch.id) {
                 return;
             }
             self.handle_window_event(
@@ -258,12 +272,12 @@ impl Game<'_> {
                 );
             }
             if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
-                self.android_menu_finger = None;
+                self.android_touch.menu_finger = None;
             }
         }
     }
     pub(super) fn android_touch_hud(&self, batch: &mut HudBatch) {
-        let editing = self.android_editor.is_some();
+        let editing = self.android_touch.editor.is_some();
         if self.title.is_some()
             || (!editing && (self.screen != Screen::Playing || self.screen_over_playing()))
         {
@@ -292,12 +306,13 @@ impl Game<'_> {
             }
         }
         for c in Control::ALL {
-            if !self.android_touch.visible(c) {
+            if !self.android_touch.controls.visible(c) {
                 continue;
             }
-            let [x, y, rw, rh] = self.android_touch.placement(c).rect(w / h.max(1.));
+            let [x, y, rw, rh] = self.android_touch.controls.placement(c).rect(w / h.max(1.));
             let color = if self
-                .android_editor
+                .android_touch
+                .editor
                 .as_ref()
                 .is_some_and(|editor| editor.selected == c)
             {

@@ -76,8 +76,8 @@ impl Game<'_> {
         #[cfg(target_os = "android")]
         {
             if matches!(event, WindowEvent::Focused(false)) {
-                self.android_touch.clear();
-                self.android_menu_finger = None;
+                self.android_touch.controls.clear();
+                self.android_touch.menu_finger = None;
                 horizon_client_render::android_runtime::clear_gamepads();
             }
             if let WindowEvent::Touch(touch) = &event {
@@ -86,7 +86,7 @@ impl Game<'_> {
             }
         }
         #[cfg(target_os = "android")]
-        if self.android_editor.is_some() {
+        if self.android_touch.editor.is_some() {
             match &event {
                 WindowEvent::KeyboardInput { event, .. } => {
                     if event.state == ElementState::Pressed
@@ -325,15 +325,15 @@ impl ApplicationHandler for Game<'_> {
     #[cfg(target_os = "android")]
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         self.android_suspended = true;
-        self.android_touch.clear();
-        self.android_menu_finger = None;
+        self.android_touch.controls.clear();
+        self.android_touch.menu_finger = None;
         self.capture(false);
         self.keys.clear();
         self.physical_keys.clear();
         horizon_client_render::android_runtime::clear_gamepads();
         horizon_client_render::android_runtime::clear_keypad();
-        if let Some(editor) = self.android_editor.take() {
-            self.android_touch.settings = editor.original;
+        if let Some(editor) = self.android_touch.editor.take() {
+            self.android_touch.controls.settings = editor.original;
         }
         self.audio.trim_decoded_cache();
         if self.title.is_none() && self.screen == Screen::Playing {

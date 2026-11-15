@@ -5327,25 +5327,6 @@ impl Renderer {
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             self.surface.take().and_then(|s| Arc::try_unwrap(s).ok());
     }
-    /// Release reusable staging allocations between frames. Submitted commands retain
-    /// their buffers; do not discard the belt of an unsubmitted section copy.
-    pub fn trim_staging_memory(&mut self) {
-        self.uploads = upload::Uploads::new(&self.device);
-        if self.section_copies.is_none() {
-            self.section_uploads = upload::Uploads::new(&self.device);
-        }
-    }
-    /// Android invalidates the native surface before returning from suspension.
-    #[cfg(target_os = "android")]
-    pub fn suspend_surface(&mut self) {
-        self.frame_gen.stop();
-        self.queue.wait();
-        self.surface = None;
-        self.spare_surface
-            .get_mut()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-    }
     /// Reattach a window after surface loss or a failed renderer replacement.
     pub fn recreate_surface(&mut self) -> Result<()> {
         self.queue.wait();

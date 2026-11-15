@@ -1436,6 +1436,7 @@ version = "0.1.0"
 dependencies = [
  "android_logger",
  "base64 0.22.1",
+ "horizon-addresses",
  "horizon-game",
  "horizon-official",
  "horizon-platform",
