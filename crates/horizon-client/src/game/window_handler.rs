@@ -75,6 +75,9 @@ impl Game<'_> {
         }
         #[cfg(target_os = "android")]
         {
+            if matches!(event, WindowEvent::Resized(_)) {
+                self.android_touch_viewport(self.android_touch.editor.is_some());
+            }
             if matches!(event, WindowEvent::Focused(false)) {
                 self.android_touch.controls.clear();
                 self.android_touch.menu_finger = None;

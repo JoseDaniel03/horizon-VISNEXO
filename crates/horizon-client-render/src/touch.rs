@@ -12,6 +12,7 @@
 //! lifts, so moving, looking and pressing never take each other's fingers.
 pub mod aim;
 pub mod layout;
+pub mod menu_pointer;
 pub use aim::{
     attack_indicator, camera_delta, hotbar_slot, item_places_entity_on_tap, item_uses_on_tap,
     projectile_crosshair, screen_direction,

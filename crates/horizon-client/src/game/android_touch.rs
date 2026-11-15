@@ -27,6 +27,17 @@ pub(super) struct Editor {
 }
 
 impl Game<'_> {
+    pub(super) fn android_touch_viewport(&mut self, editing: bool) {
+        if let Some(window) = &self.window {
+            let size = window.inner_size();
+            let height = if editing {
+                (size.height as f32 * 0.88).round() as u32
+            } else {
+                size.height
+            };
+            self.android_touch.controls.viewport(size.width, height);
+        }
+    }
     pub(super) fn android_cancel_editor(&mut self) {
         if let Some(editor) = self.android_touch.editor.take() {
             self.android_touch.controls.settings = editor.original;
@@ -34,6 +45,7 @@ impl Game<'_> {
         self.android_touch.controls.clear();
         self.screen = Screen::Playing;
         self.capture(true);
+        self.android_touch_viewport(false);
     }
     fn android_touch_requests(&mut self) {
         for (requested, key) in [
@@ -69,6 +81,7 @@ impl Game<'_> {
             });
             self.android_touch.controls.clear();
             self.screen = Screen::Paused;
+            self.android_touch_viewport(true);
             self.capture(false);
             self.pause = self.pauses_game();
             if let Some(server) = &self.integrated {
@@ -80,13 +93,13 @@ impl Game<'_> {
     fn android_edit_touch(&mut self, touch: &Touch) {
         let Some(window) = &self.window else { return };
         let size = window.inner_size();
-        let point = [
+        let mut point = [
             touch.location.x as f32 / size.width.max(1) as f32,
             touch.location.y as f32 / size.height.max(1) as f32,
         ];
         self.android_touch
             .controls
-            .viewport(size.width, size.height);
+            .viewport(size.width, (size.height as f32 * 0.88).round() as u32);
         if touch.phase == TouchPhase::Started && point[1] < 0.12 {
             let action = (point[0].clamp(0., 0.999) * 8.) as usize;
             match action {
@@ -132,14 +145,16 @@ impl Game<'_> {
                 self.android_touch.controls.clear();
                 self.screen = Screen::Playing;
                 self.capture(true);
+                self.android_touch_viewport(false);
             }
             return;
         }
+        point[1] = (point[1] - 0.12) / 0.88;
         let Some(editor) = self.android_touch.editor.as_mut() else {
             return;
         };
         if touch.phase == TouchPhase::Started {
-            let aspect = size.width.max(1) as f32 / size.height.max(1) as f32;
+            let aspect = size.width.max(1) as f32 / (size.height.max(1) as f32 * 0.88);
             editor.drag = Control::ALL
                 .into_iter()
                 .rev()
@@ -168,7 +183,7 @@ impl Game<'_> {
                 };
                 self.android_touch.controls.settings.layouts[mode]
                     [self.android_touch.controls.settings.slot(control)]
-                .center = [x.clamp(0.04, 0.96), point[1].clamp(0.16, 0.94)];
+                .center = [x.clamp(0.04, 0.96), point[1].clamp(0.04, 0.96)];
             }
             if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
                 editor.drag = None;
@@ -189,7 +204,23 @@ impl Game<'_> {
             self.android_edit_touch(&touch);
             return;
         }
-        if self.title.is_none() && self.screen == Screen::Playing && !self.screen_over_playing() {
+        use horizon_client_render::touch::menu_pointer::{self, Route};
+        let menu_open =
+            self.title.is_some() || self.screen != Screen::Playing || self.screen_over_playing();
+        let route = menu_pointer::route(
+            &mut self.android_touch.menu_finger,
+            touch.id,
+            touch.phase == TouchPhase::Started,
+            matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled),
+            menu_open,
+        );
+        if menu_open {
+            self.android_touch.controls.clear();
+        }
+        if route == Route::Ignore {
+            return;
+        }
+        if route == Route::World {
             if touch.phase == TouchPhase::Started {
                 let (w, h) = self.gui_size();
                 let scale = self.gui_scale().map_or(1.0, |g| g.scale);
@@ -240,12 +271,6 @@ impl Game<'_> {
             }
         } else {
             self.android_touch.controls.clear();
-            if touch.phase == TouchPhase::Started && self.android_touch.menu_finger.is_none() {
-                self.android_touch.menu_finger = Some(touch.id);
-            }
-            if self.android_touch.menu_finger != Some(touch.id) {
-                return;
-            }
             self.handle_window_event(
                 events,
                 id,
@@ -270,9 +295,6 @@ impl Game<'_> {
                     },
                     origin,
                 );
-            }
-            if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
-                self.android_touch.menu_finger = None;
             }
         }
     }
@@ -305,11 +327,17 @@ impl Game<'_> {
                 );
             }
         }
+        let control_h = if editing { h * 0.88 } else { h };
+        let y_offset = if editing { h * 0.12 } else { 0. };
         for c in Control::ALL {
             if !self.android_touch.controls.visible(c) {
                 continue;
             }
-            let [x, y, rw, rh] = self.android_touch.controls.placement(c).rect(w / h.max(1.));
+            let [x, y, rw, rh] = self
+                .android_touch
+                .controls
+                .placement(c)
+                .rect(w / control_h.max(1.));
             let color = if self
                 .android_touch
                 .editor
@@ -320,10 +348,24 @@ impl Game<'_> {
             } else {
                 0x88333333
             };
-            batch.fill(atlas, x * w, y * h, rw * w, rh * h, color);
+            batch.fill(
+                atlas,
+                x * w,
+                y_offset + y * control_h,
+                rw * w,
+                rh * control_h,
+                color,
+            );
             let label =
                 horizon_client_render::lang::get(&format!("vis.touch.control.{}", c as usize));
-            batch.text(atlas, &label, x * w + 2., y * h + 2., 0xffffffff, true);
+            batch.text(
+                atlas,
+                &label,
+                x * w + 2.,
+                y_offset + y * control_h + 2.,
+                0xffffffff,
+                true,
+            );
         }
     }
 }

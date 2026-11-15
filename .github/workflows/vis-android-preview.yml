@@ -24,6 +24,8 @@ jobs:
           /tmp/android-policy-tests
           rustc --edition 2024 --test crates/horizon-client-render/src/audio/decoded_cache.rs -o /tmp/android-cache-tests
           /tmp/android-cache-tests
+          rustc --edition 2024 --test crates/horizon-client-render/src/touch/menu_pointer.rs -o /tmp/android-pointer-tests
+          /tmp/android-pointer-tests
       - name: Install NDK and check the current fork, never another game tree
         shell: bash
         run: |
