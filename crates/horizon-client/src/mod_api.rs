@@ -90,6 +90,8 @@ pub use horizon_protocol::entity_data::Value as EntityDataValue;
 pub use horizon_protocol::packets::play::Clientbound as ClientboundPlayPacket;
 /// The play packets a client sends, as `native_send_packet` takes them.
 pub use horizon_protocol::packets::play::Serverbound as ServerboundPlayPacket;
+/// A validated custom payload for vanilla-compatible plugin channels (VSClient protocol 8).
+pub use horizon_protocol::packets::configuration::CustomPayload;
 pub use horizon_world::consumable::UseAnimation;
 /// Vanilla's `TagParser`: the tag an SNBT text holds and the bytes it read
 /// (`ItemStack::from_nbt` reads an item from it). API @API:item_from_snbt@.

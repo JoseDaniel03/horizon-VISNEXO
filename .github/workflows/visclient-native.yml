@@ -1,0 +1,74 @@
+name: VSClient MCRust native port
+on:
+  push:
+    paths:
+      - 'integrations/vsclient-horizon/**'
+      - 'crates/horizon-client/Cargo.toml'
+      - 'crates/horizon-client/src/mod_api.rs'
+      - 'crates/horizon-client/tests/vsclient_native_port.rs'
+      - '.github/workflows/visclient-native.yml'
+  pull_request:
+    paths:
+      - 'integrations/vsclient-horizon/**'
+      - 'crates/horizon-client/Cargo.toml'
+      - 'crates/horizon-client/src/mod_api.rs'
+      - 'crates/horizon-client/tests/vsclient_native_port.rs'
+      - '.github/workflows/visclient-native.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vsclient-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile and run standalone protocol 8 and cinematic parity tests
+        run: |
+          rustc --edition=2024 --test integrations/vsclient-horizon/api/src/core.rs \
+            -o /tmp/visclient-mcrust-protocol-tests
+          /tmp/visclient-mcrust-protocol-tests --nocapture
+      - name: Verify native bundle manifest and supported feature hooks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+          root = Path('integrations/vsclient-horizon')
+          data = tomllib.loads((root/'horizon-mixin.toml').read_text())
+          assert data['mod']['id'] == 'vsclient'
+          assert data['api']['path'] == 'api'
+          assert (root/'api/Cargo.toml').is_file()
+          source = (root/'api/src/lib.rs').read_text()
+          for hook in ('client_packet(', 'camera_pose(', 'compute_fov(',
+                       'client_player_network_logging_in(', 'client_disconnecting('):
+              assert hook in source, hook
+          assert 'virgoland:hello' in (root/'api/src/core.rs').read_text()
+          assert not list(root.rglob('*.jar'))
+          print('Native VSClient bundle manifest and API hooks passed')
+          PY
+      - name: Build source bundle for VIS Nexo native-build
+        run: |
+          tar -czf VSClient-MCRust-native-source.tar.gz -C integrations vsclient-horizon
+          test -s VSClient-MCRust-native-source.tar.gz
+          sha256sum VSClient-MCRust-native-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VSClient-MCRust-native-source
+          path: VSClient-MCRust-native-source.tar.gz
+          retention-days: 21
+          if-no-files-found: error
+  native-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile VSClient adapter against Horizon's real native hook trait
+        run: |
+          cargo check --locked -p horizon-client --test vsclient_native_port --no-default-features

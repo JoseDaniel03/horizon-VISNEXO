@@ -1,0 +1,10 @@
+# VSClient native for VIS MCRust / Horizon 26.3.
+# Installed Horizon and this mod are built together from the same source.
+# Do not pin the game to an older source revision; the launcher uses the
+# selected VIS Nexo/Horizon instance, including the native payload API.
+[mod]
+id = "vsclient"
+version = "0.1.0"
+
+[api]
+path = "api"
