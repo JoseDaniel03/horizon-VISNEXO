@@ -541,6 +541,10 @@ pub fn latest_path() -> Option<PathBuf> {
 /// Starts the log in `home/logs`. The main thread shows as `main_thread` in it. Messages are
 /// still printed when the file cannot be opened.
 pub fn init(home: &Path, main_thread: &'static str) {
+    // Android starts this before entering the engine.
+    if LOGGER.get().is_some() {
+        return;
+    }
     let dir = logs_dir(home);
     let file = match open_latest(&dir) {
         Ok(Some(latest)) => {

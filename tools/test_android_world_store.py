@@ -13,9 +13,14 @@ STUBS = {
  public static java.io.File home,external; public static String caller="com.visstudios.nexo.mobile";
  static final SharedPreferences prefs=new SharedPreferences();
  public java.io.File getFilesDir(){return home;} public java.io.File getExternalFilesDir(String s){return external;}
+ public Object getSystemService(String s){return new ExitManager();}
  public SharedPreferences getSharedPreferences(String s,int i){return prefs;}
  public android.content.pm.PackageManager getPackageManager(){return new android.content.pm.PackageManager();}}
 ''',
+ 'android/content/ExitManager.java': '''package android.content; public class ExitManager {
+ public java.util.List<ExitInfo> getHistoricalProcessExitReasons(String p,int pid,int count){return java.util.List.of(new ExitInfo());}}''',
+ 'android/content/ExitInfo.java': '''package android.content; public class ExitInfo {
+ public int getReason(){return 3;} public int getStatus(){return 9;} public long getTimestamp(){return 12345;}}''',
  'android/content/SharedPreferences.java': '''package android.content; public class SharedPreferences {
  java.util.HashMap<String,String> data=new java.util.HashMap<>();
  public String getString(String k,String d){return data.getOrDefault(k,d);}
@@ -54,7 +59,17 @@ public class StorageTest {
   check(!store.call("delete",null,b).getBoolean("ok"));check(saved.exists());VisGameStore.end();
   check(!store.call("prepare",null,request(ID,"internal")).getBoolean("ok"));check(saved.exists());
   Context.caller="malicious.app";try{store.call("delete",null,b);throw new AssertionError();}catch(SecurityException expected){}
+  try{store.call("diagnostics",null,null);throw new AssertionError();}catch(SecurityException expected){}
   Context.caller="com.visstudios.nexo.mobile";
+  check(store.call("diagnostics",null,null).getString("report").contains("No engine log"));
+  File log=new File(Context.home,"logs/latest.log");log.getParentFile().mkdirs();
+  Files.writeString(log.toPath(),"x".repeat(10000)+"\\n[00:00:00] [main/ERROR]: GPU failed token=supersecret /data/user/0/private/path\\n");
+  String report=store.call("diagnostics",null,null).getString("report");
+  check(report.contains("Android exit reason: 3; status: 9; time: 12345"));
+  check(report.contains("GPU failed") && !report.contains("supersecret") && !report.contains("/data/user"));
+  check(report.length()<=2000);
+  Files.delete(log.toPath());Files.createSymbolicLink(log.toPath(),new File(Context.home,"logs/other.log").toPath());
+  check(store.call("diagnostics",null,null).getString("report").contains("No engine log"));
   check(!store.call("delete",null,request("../escape","internal")).getBoolean("ok"));
   File outside=new File(args[0],"outside");outside.mkdirs();File precious=new File(outside,"keep");Files.writeString(precious.toPath(),"safe");
   Files.createSymbolicLink(new File(world,"link").toPath(),outside.toPath());

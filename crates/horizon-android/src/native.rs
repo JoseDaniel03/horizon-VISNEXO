@@ -225,14 +225,10 @@ impl Drop for ActivityFinish {
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
     let _finish = ActivityFinish(app.clone());
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Info)
-            .with_tag("VIS-McRust"),
-    );
     let Some(home) = app.internal_data_path() else {
         return;
     };
+    horizon_game::android::initialize_logging(&home);
     let Some(request) = launch(&app) else {
         log::error!("Missing or incompatible Nexo engine handoff");
         return;

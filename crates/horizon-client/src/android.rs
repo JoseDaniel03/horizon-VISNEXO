@@ -34,3 +34,9 @@ pub fn prepare_resources(root: &Path) -> Result<(), String> {
         .get()
         .ok_or("Android resource installer missing")?(root)
 }
+
+/// Start the engine log before validating the Android launch handoff.
+pub fn initialize_logging(home: &Path) {
+    crate::logging::set_game_home(home.to_path_buf());
+    crate::logging::init(home, "Android main");
+}

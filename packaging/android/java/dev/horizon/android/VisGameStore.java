@@ -50,6 +50,7 @@ public final class VisGameStore extends ContentProvider {
         boolean trusted = false;
         if (callers != null) for (String name: callers) if (name.equals("com.visstudios.nexo.mobile")) trusted = true;
         if (!trusted) throw new SecurityException("Nexo only");
+        if ("diagnostics".equals(method)) return diagnostics();
         synchronized (VisGameStore.class) {
             Bundle result = new Bundle();
             try {
@@ -85,6 +86,48 @@ public final class VisGameStore extends ContentProvider {
             } catch (Exception error) { result.putBoolean("ok",false); result.putString("error","Cerrá McRust y comprobá que el almacenamiento esté disponible. No se quitó la instancia de Nexo."); }
             return result;
         }
+    }
+    private Bundle diagnostics() {
+        Bundle result = new Bundle();
+        StringBuilder report = new StringBuilder("VIS Nexo Rust Android\n");
+        // Android 11+ exit history, without requiring the API on older devices.
+        try {
+            Object manager = android.content.Context.class.getMethod("getSystemService", String.class)
+                .invoke(getContext(), "activity");
+            java.util.List<?> exits = (java.util.List<?>) manager.getClass()
+                .getMethod("getHistoricalProcessExitReasons", String.class, int.class, int.class)
+                .invoke(manager, null, 0, 1);
+            if (!exits.isEmpty()) {
+                Object exit = exits.get(0);
+                report.append("Android exit reason: ").append(exit.getClass().getMethod("getReason").invoke(exit))
+                    .append("; status: ").append(exit.getClass().getMethod("getStatus").invoke(exit))
+                    .append("; time: ").append(exit.getClass().getMethod("getTimestamp").invoke(exit)).append('\n');
+            }
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            report.append("Android exit history unavailable\n");
+        }
+        File log = new File(getContext().getFilesDir(), "logs/latest.log");
+        try {
+            if (!log.getCanonicalFile().equals(log.getAbsoluteFile())) throw new IOException("Unsafe log");
+            try (java.io.RandomAccessFile input = new java.io.RandomAccessFile(log, "r")) {
+                int size = (int)Math.min(input.length(), 8192);
+                input.seek(input.length() - size);
+                byte[] bytes = new byte[size]; input.readFully(bytes);
+                String tail = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                for (String line : tail.split("\n")) {
+                    if (line.contains("/ERROR]") || line.contains("/WARN]")) report.append(line).append('\n');
+                }
+            }
+        } catch (IOException unavailable) { report.append("No engine log available\n"); }
+        String text = report.toString();
+        // Remove credentials and private paths before anything crosses into Nexo.
+        text = text.replaceAll("(?i)Bearer\\s+[A-Za-z0-9._~+/-]+", "Bearer [OCULTO]")
+            .replaceAll("(?i)(?:access_token|refresh_token|token|password|secret|authorization|ticket|device_code|api[_-]?key)\\s*[:=]\\s*[\\\"']?[^\\\"'\\s&,;}]+", "credencial=[OCULTA]")
+            .replaceAll("(?:/data/|/storage/|/sdcard/|/home/|/Users/)[^\\s,;\\\"']+", "[RUTA PRIVADA]")
+            .replaceAll("[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}", "[CORREO PRIVADO]");
+        if (text.length() > 2000) text = text.substring(0, 200) + "\n" + text.substring(text.length()-1800);
+        result.putString("report", text); result.putBoolean("ok", true);
+        return result;
     }
     private static void erase(File file) throws IOException {
         // A symlink is unlinked, never traversed.
