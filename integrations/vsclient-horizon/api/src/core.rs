@@ -35,6 +35,11 @@ pub struct Effect {
     pub fade_out: f64,
     pub strength: f64,
 }
+/// Supported software overlays on the final game GUI. Unknown server effect
+/// identifiers are intentionally ignored until their native renderer exists.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Overlay {pub rgb: u32, pub alpha: f32, pub letterbox: bool}
+
 #[derive(Clone, Debug)]
 pub struct CameraCue {
     pub revision: u64,
@@ -165,7 +170,7 @@ pub fn auth_ticket(ticket:&str) -> Result<Vec<u8>,&'static str> {
     encode_string(&format!("8|{ticket}"))
 }
 pub fn hello() -> Vec<u8> {
-    encode_string("8|0.1.0-mcrust|CAMERA_V1").expect("constant is safe")
+    encode_string("8|0.2.0-mcrust|CAMERA_V1,CONTROLS_V1,VIEW_V1").expect("constant is safe")
 }
 #[derive(Default)]
 pub struct CameraSession {
@@ -188,6 +193,29 @@ impl CameraSession {
             return None;
         }
         Some(cue.sample(elapsed))
+    }
+    pub fn overlays(&mut self, now: Instant) -> Vec<Overlay> {
+        let Some((started,cue)) = self.current.as_ref() else {return vec![]};
+        let elapsed=now.saturating_duration_since(*started).as_secs_f64();
+        if elapsed>cue.duration(){return vec![];}
+        let mut overlays=Vec::new();
+        for e in &cue.effects {
+            if elapsed<e.begin || elapsed>e.begin+e.duration {continue;}
+            let (rgb,letterbox)=match e.id.as_str() {
+                "cinema:fade_black" | "cinema:black" => (0x000000,false),
+                "cinema:fade_white" | "cinema:flash_white" => (0xffffff,false),
+                "cinema:letterbox" => (0x000000,true),
+                _ => continue,
+            };
+            let local=elapsed-e.begin;
+            let enter=if e.fade_in>0.0 {(local/e.fade_in).clamp(0.0,1.0)} else {1.0};
+            let exit=if e.fade_out>0.0 {
+                ((e.duration-local)/e.fade_out).clamp(0.0,1.0)
+            } else {1.0};
+            let alpha=(e.strength*enter.min(exit)).clamp(0.0,1.0) as f32;
+            if alpha>0.0 {overlays.push(Overlay{rgb,alpha,letterbox});}
+        }
+        overlays
     }
     pub fn reset(&mut self){self.current=None;self.last_revision=None;}
 }
@@ -225,6 +253,19 @@ mod tests {
         assert!((half.yaw-360.0).abs()<0.01);
         assert!((half.fov-80.0).abs()<0.01);
         assert_eq!(cue.duration(),2.0);
+    }
+    #[test]
+    fn sends_only_advertised_capabilities_and_bounds_visual_fades() {
+        assert_eq!(decode_string(&hello(),MAX_WIRE_BYTES).unwrap(),
+            "8|0.2.0-mcrust|CAMERA_V1,CONTROLS_V1,VIEW_V1");
+        let now=Instant::now();
+        let mut c=CameraSession::default();
+        c.accept("v1|1|0,0,64,0,0,0,0,70;4,0,64,0,0,0,0,70|cinema:fade_black,0,4,1,1,0.75;cinema:unknown,0,4,0,0,1",now).unwrap();
+        assert!(c.overlays(now).is_empty());
+        let mid=c.overlays(now+std::time::Duration::from_secs(2));
+        assert_eq!(mid.len(),1);
+        assert_eq!(mid[0],Overlay{rgb:0,alpha:0.75,letterbox:false});
+        assert!(c.overlays(now+std::time::Duration::from_secs(5)).is_empty());
     }
     #[test]
     fn rejects_malformed_oversized_nonfinite_and_replayed_cues() {
