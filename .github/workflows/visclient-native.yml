@@ -34,6 +34,9 @@ jobs:
           rustc --edition=2024 --test integrations/vsclient-horizon/api/src/core.rs \
             -o /tmp/visclient-mcrust-protocol-tests
           /tmp/visclient-mcrust-protocol-tests --nocapture
+          rustc --edition=2024 --test integrations/vsclient-horizon/api/src/controls.rs \
+            -o /tmp/visclient-mcrust-controls-tests
+          /tmp/visclient-mcrust-controls-tests --nocapture
       - name: Verify native bundle manifest and supported feature hooks
         run: |
           python3 - <<'PY'
@@ -46,7 +49,8 @@ jobs:
           assert (root/'api/Cargo.toml').is_file()
           source = (root/'api/src/lib.rs').read_text()
           for hook in ('client_packet(', 'camera_pose(', 'compute_fov(',
-                       'client_player_network_logging_in(', 'client_disconnecting('):
+                       'client_player_network_logging_in(', 'client_disconnecting(',
+                       'client_tick_post(', 'key(', 'gui_render_post('):
               assert hook in source, hook
           assert 'virgoland:hello' in (root/'api/src/core.rs').read_text()
           assert not list(root.rglob('*.jar'))
