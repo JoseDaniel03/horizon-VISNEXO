@@ -6,7 +6,7 @@ use core::{CameraSession, CHANNEL_CAMERA, MAX_CUE_BYTES, decode_string};
 use controls::{ControlsSession, InputAction, CHANNEL_INPUT, CHANNEL_PROFILE, CHANNEL_STATE, CHANNEL_VIEW};
 use horizon_client::mod_api::{
     CameraPoseEvent, ClientDisconnectingEvent, ClientPacketEvent, GuiRenderPostEvent,
-    ClientPlayerNetworkLoggingInEvent, ClientboundPlayPacket, ComputeFovEvent,
+    ClientPlayerNetworkLoggingInEvent, ClientTickPostEvent, ClientboundPlayPacket, ComputeFovEvent,
     CustomPayload, Hooks, Host, KeyEvent, NativeScreenKind, ServerboundPlayPacket,
 };
 use std::{sync::Mutex, time::Instant};
@@ -100,6 +100,14 @@ impl Hooks for VsClientHorizon {
         let playing = in_world(host);
         let actions = self.controls.lock().ok()
             .map(|mut c| c.handle_key(event.key, event.pressed, playing));
+        if let Some(actions) = actions { send_actions(host, actions); }
+    }
+
+    fn client_tick_post(&self, host: &mut dyn Host, _event: &mut ClientTickPostEvent) {
+        // Releasing an open menu or losing focus must never leave a remote
+        // vehicle, revive or other hold action stuck down on the server.
+        let playing = in_world(host);
+        let actions = self.controls.lock().ok().map(|mut c| c.heartbeat(playing));
         if let Some(actions) = actions { send_actions(host, actions); }
     }
 
