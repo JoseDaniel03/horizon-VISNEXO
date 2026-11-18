@@ -2,6 +2,7 @@
 //! Shares the Java VSClient Bridge protocol 8. Server remains authoritative.
 mod core;
 mod cinematic;
+mod feedback;
 mod controls;
 mod ui;
 use core::{CameraSession, CHANNEL_CAMERA, MAX_CUE_BYTES, decode_string};
@@ -12,6 +13,7 @@ use horizon_client::mod_api::{
     CustomPayload, Hooks, Host, KeyEvent, NativeScreenKind, ServerboundPlayPacket,
     ClientStartEvent, Flow, ScreenRenderPostEvent, ScreenKeyPressedPreEvent,
     ScreenMouseButtonPressedPreEvent, MouseButtonPreEvent, MovementInputEvent,
+    CameraShakeEvent, RenderHandPoseEvent, Hand,
 };
 use std::{sync::Mutex, time::Instant};
 
@@ -19,6 +21,7 @@ pub fn hooks() -> Box<dyn Hooks> {
     Box::new(VsClientHorizon {
         camera: Mutex::new(CameraSession::default()),
         cinematic: Mutex::new(cinematic::Session::default()),
+        feedback: Mutex::new(feedback::Session::default()),
         controls: Mutex::new(ControlsSession::default()),
         zoom: Mutex::new(1.0),
     })
@@ -26,6 +29,7 @@ pub fn hooks() -> Box<dyn Hooks> {
 struct VsClientHorizon {
     camera: Mutex<CameraSession>,
     cinematic: Mutex<cinematic::Session>,
+    feedback: Mutex<feedback::Session>,
     controls: Mutex<ControlsSession>,
     zoom: Mutex<f32>,
 }
@@ -113,6 +117,8 @@ impl Hooks for VsClientHorizon {
         if let Ok(mut c) = self.cinematic.lock() { c.reset(); }
         if let Ok(mut c) = self.controls.lock() { c.reset(); }
         if let Ok(mut z) = self.zoom.lock() { *z = 1.0; }
+        if let Ok(mut f) = self.feedback.lock() { f.reset(); }
+        if let Ok(mut f) = self.feedback.lock() { f.reset(); }
         // A one-use bridge ticket may be injected by the parent process.
         // No fake auth, no logging secrets, no disk persistence.
         if let Ok(ticket) = std::env::var("VIS_NEXO_CLIENT_BRIDGE_TICKET") {
@@ -131,6 +137,18 @@ impl Hooks for VsClientHorizon {
     fn client_packet(&self, host: &mut dyn Host, event: &mut ClientPacketEvent<'_>) {
         let ClientboundPlayPacket::CustomPayload(packet) = event.packet else { return };
         let channel = packet.channel.as_str();
+        if channel == feedback::CHANNEL_EFFECT {
+            if let Ok(text)=decode_string(&packet.data,128){
+                if let Ok(mut f)=self.feedback.lock(){let _=f.accept_effect(text,Instant::now());}
+            }
+            return;
+        }
+        if channel == feedback::CHANNEL_RELOAD {
+            if let Ok(mut f)=self.feedback.lock(){
+                let _=f.accept_reload(&packet.data,Instant::now());
+            }
+            return;
+        }
         let max = if channel == CHANNEL_PROFILE || channel == cinematic::CHANNEL { 30_000 } else { MAX_CUE_BYTES };
         if !matches!(channel, CHANNEL_CAMERA | CHANNEL_STATE | CHANNEL_PROFILE | CHANNEL_VIEW | "virgoland:controls" | cinematic::CHANNEL) {
             return;
@@ -187,6 +205,9 @@ impl Hooks for VsClientHorizon {
         // Releasing an open menu or losing focus must never leave a remote
         // vehicle, revive or other hold action stuck down on the server.
         let playing = in_world(host);
+        if !playing {
+            if let Ok(mut f)=self.feedback.lock(){f.reset();}
+        }
         let actions = self.controls.lock().ok().map(|mut c| c.heartbeat(playing));
         if let Some(actions) = actions { send_actions(host, actions); }
     }
@@ -256,6 +277,31 @@ impl Hooks for VsClientHorizon {
         Flow::Continue
     }
 
+    fn camera_shake(&self, host: &dyn Host, event: &mut CameraShakeEvent<'_>) {
+        if !in_world(host) {return;}
+        // Scene cameras exclude weapon recoil, matching Fabric behaviour.
+        if self.cinematic.lock().ok()
+            .is_some_and(|mut c|c.active(Instant::now()).is_some_and(|(s,_)|s.primary_camera(0.0).is_some())) {
+            return;
+        }
+        if let Ok(mut f)=self.feedback.lock(){
+            let recoil=f.sample(Instant::now());
+            event.shake.pitch+=recoil.pitch;
+            event.shake.yaw+=recoil.yaw;
+        }
+    }
+
+    fn render_hand_pose(&self, host:&dyn Host, event:&mut RenderHandPoseEvent<'_>) {
+        if !in_world(host) || event.hand!=Hand::Main {return;}
+        if let Ok(mut f)=self.feedback.lock() {
+            let reach=f.reload_reach(Instant::now());
+            event.x+=0.18*reach;
+            event.y-=0.22*reach;
+            event.z-=0.12*reach;
+            event.roll-=25.0*reach;
+        }
+    }
+
     fn camera_pose(&self, _host: &dyn Host, event: &mut CameraPoseEvent<'_>) {
         if let Ok(mut cinema)=self.cinematic.lock() {
             if let Some((scene,time))=cinema.active(Instant::now()) {
@@ -292,8 +338,9 @@ impl Hooks for VsClientHorizon {
             }
         }
         // Server VIEW_V1 zoom is visual only and never changes player speed.
+        let recoil=self.feedback.lock().map(|mut f|f.sample(Instant::now()).fov).unwrap_or(0.0);
         if let Ok(zoom) = self.zoom.lock() {
-            event.degrees = (event.degrees / *zoom).clamp(1.0, 179.0);
+            event.degrees = (event.degrees / *zoom + recoil).clamp(15.0, 150.0);
         }
     }
 
