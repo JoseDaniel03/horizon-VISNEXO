@@ -1,6 +1,7 @@
 //! VSClient native for VIS McRust / Horizon 26.3.
 //! Shares the Java VSClient Bridge protocol 8. Server remains authoritative.
 mod core;
+mod cinematic;
 mod controls;
 mod ui;
 use core::{CameraSession, CHANNEL_CAMERA, MAX_CUE_BYTES, decode_string};
@@ -17,12 +18,14 @@ use std::{sync::Mutex, time::Instant};
 pub fn hooks() -> Box<dyn Hooks> {
     Box::new(VsClientHorizon {
         camera: Mutex::new(CameraSession::default()),
+        cinematic: Mutex::new(cinematic::Session::default()),
         controls: Mutex::new(ControlsSession::default()),
         zoom: Mutex::new(1.0),
     })
 }
 struct VsClientHorizon {
     camera: Mutex<CameraSession>,
+    cinematic: Mutex<cinematic::Session>,
     controls: Mutex<ControlsSession>,
     zoom: Mutex<f32>,
 }
@@ -42,6 +45,57 @@ fn in_world(host: &dyn Host) -> bool {
     host.client_state().is_some_and(|s| s.focused
         && s.screen == NativeScreenKind::Playing && s.world.is_some())
 }
+/// V3 overlays use Horizon's safe GUI primitives. No direct renderer access:
+/// additional world views, rotated/scaled text and actor geometry need a GPU
+/// implementation before we can advertise the full V3 capability.
+fn paint_scene(host:&dyn Host,batch:&mut horizon_client::mod_api::HudBatch,
+    scene:&cinematic::Scene,width:f32,height:f32)
+{
+    for e in &scene.effects {
+        let alpha=(e.amount.clamp(0.0,1.0)*255.0).round() as u32;
+        if alpha==0 {continue;}
+        let r=[e.rect.x*width,e.rect.y*height,e.rect.w*width,e.rect.h*height];
+        match e.kind.as_str() {
+            "letterbox" => {
+                let h=(height*0.15*e.amount).min(height*0.2);
+                host.fill(batch,[0.0,0.0,width,h],0xff000000);
+                host.fill(batch,[0.0,height-h,width,h],0xff000000);
+            }
+            "vignette" => {
+                // Bounded, non-shader approximation; a single pass of 8 bands.
+                for i in 0..8_u32 {
+                    let inset=i as f32*width.min(height)*0.018;
+                    let opacity=((alpha as f32)*(1.0-i as f32/8.0)/10.0) as u32;
+                    let color=opacity<<24;
+                    let thick=(height*0.017).max(1.0);
+                    host.fill(batch,[inset,inset,width-2.0*inset,thick],color);
+                    host.fill(batch,[inset,height-inset-thick,width-2.0*inset,thick],color);
+                }
+            }
+            _ => {
+                let rgb=match e.kind.as_str() {
+                    "fade-black"=>0,"fade-white"|"flash"=>0xffffff,_=>e.color&0xffffff
+                };
+                host.fill(batch,r,(alpha<<24)|rgb);
+            }
+        }
+    }
+    for c in &scene.captions {
+        if c.opacity<=0.0 {continue;}
+        // Text uses Horizon's current resource-pack glyph atlas. For now the
+        // native API exposes unscaled opaque text, so use the original color
+        // and horizontal anchoring without claiming Java's full typography.
+        let line=c.text.lines().next().unwrap_or("");
+        let text:String=line.chars().take(200).collect();
+        let advance=host.text_width(&text);
+        let x=c.x*width - match c.align.as_str(){
+            "center"=>advance*0.5,"right"=>advance,_=>0.0
+        };
+        let y=c.y*height;
+        host.text(batch,&text,[x,y],c.color&0xffffff,true);
+    }
+}
+
 impl Hooks for VsClientHorizon {
     fn client_start(&self, host: &mut dyn Host, _event: &mut ClientStartEvent) {
         if let Some(saved)=host.setting(ui::ID, "bindings") {
@@ -56,6 +110,7 @@ impl Hooks for VsClientHorizon {
         _event: &mut ClientPlayerNetworkLoggingInEvent,
     ) {
         if let Ok(mut c) = self.camera.lock() { c.reset(); }
+        if let Ok(mut c) = self.cinematic.lock() { c.reset(); }
         if let Ok(mut c) = self.controls.lock() { c.reset(); }
         if let Ok(mut z) = self.zoom.lock() { *z = 1.0; }
         // A one-use bridge ticket may be injected by the parent process.
@@ -76,12 +131,18 @@ impl Hooks for VsClientHorizon {
     fn client_packet(&self, host: &mut dyn Host, event: &mut ClientPacketEvent<'_>) {
         let ClientboundPlayPacket::CustomPayload(packet) = event.packet else { return };
         let channel = packet.channel.as_str();
-        let max = if channel == CHANNEL_PROFILE { 32_768 } else { MAX_CUE_BYTES };
-        if !matches!(channel, CHANNEL_CAMERA | CHANNEL_STATE | CHANNEL_PROFILE | CHANNEL_VIEW | "virgoland:controls") {
+        let max = if channel == CHANNEL_PROFILE || channel == cinematic::CHANNEL { 30_000 } else { MAX_CUE_BYTES };
+        if !matches!(channel, CHANNEL_CAMERA | CHANNEL_STATE | CHANNEL_PROFILE | CHANNEL_VIEW | "virgoland:controls" | cinematic::CHANNEL) {
             return;
         }
         let Ok(text) = decode_string(&packet.data, max) else { return };
         match channel {
+            cinematic::CHANNEL => {
+                let accepted=self.cinematic.lock().is_ok_and(|mut c|c.accept(text,Instant::now()).is_ok());
+                if accepted {
+                    if let Ok(mut camera)=self.camera.lock(){camera.reset();}
+                }
+            }
             CHANNEL_CAMERA => {
                 if let Ok(mut c) = self.camera.lock() {
                     let _ = c.accept(text, Instant::now());
@@ -168,6 +229,16 @@ impl Hooks for VsClientHorizon {
     }
 
     fn camera_pose(&self, _host: &dyn Host, event: &mut CameraPoseEvent<'_>) {
+        if let Ok(mut cinema)=self.cinematic.lock() {
+            if let Some((scene,time))=cinema.active(Instant::now()) {
+                if let Some(pose)=scene.primary_camera(time) {
+                    *event.position=pose.pos;
+                    event.yaw=pose.yaw;
+                    event.pitch=pose.pitch;
+                    return;
+                }
+            }
+        }
         let Ok(mut camera) = self.camera.lock() else { return };
         if let Some(pose) = camera.sample(Instant::now()) {
             // Camera-only. The server continues to own movement and hit tests.
@@ -178,6 +249,14 @@ impl Hooks for VsClientHorizon {
     }
 
     fn compute_fov(&self, _host: &dyn Host, event: &mut ComputeFovEvent) {
+        if let Ok(mut cinema)=self.cinematic.lock() {
+            if let Some((scene,time))=cinema.active(Instant::now()) {
+                if let Some(pose)=scene.primary_camera(time) {
+                    event.degrees=pose.fov;
+                    return;
+                }
+            }
+        }
         if let Ok(mut camera) = self.camera.lock() {
             if let Some(pose) = camera.sample(Instant::now()) {
                 event.degrees = pose.fov;
@@ -196,6 +275,13 @@ impl Hooks for VsClientHorizon {
         if state.screen != NativeScreenKind::Playing || state.world.is_none() { return; }
         let (width,height) = (event.batch.width,event.batch.height);
         if width <= 0.0 || height <= 0.0 { return; }
+        // Render the bounded V3 effects/captions even for clients whose
+        // server sends scenes without relying on capability negotiation.
+        if let Ok(mut cinema)=self.cinematic.lock(){
+            if let Some((scene,_time))=cinema.active(Instant::now()){
+                paint_scene(host,event.batch,scene,width,height);
+            }
+        }
         let Ok(mut camera) = self.camera.lock() else { return };
         for overlay in camera.overlays(Instant::now()) {
             let alpha = (overlay.alpha.clamp(0.0,1.0) * 255.0).round() as u32;
@@ -213,6 +299,7 @@ impl Hooks for VsClientHorizon {
 
     fn client_disconnecting(&self, _host: &dyn Host, _event: &mut ClientDisconnectingEvent) {
         if let Ok(mut c) = self.camera.lock() { c.reset(); }
+        if let Ok(mut c) = self.cinematic.lock() { c.reset(); }
         if let Ok(mut c) = self.controls.lock() { c.reset(); }
         if let Ok(mut z) = self.zoom.lock() { *z = 1.0; }
     }
