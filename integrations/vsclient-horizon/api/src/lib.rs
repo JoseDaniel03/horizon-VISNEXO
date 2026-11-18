@@ -11,7 +11,7 @@ use horizon_client::mod_api::{
     ClientPlayerNetworkLoggingInEvent, ClientTickPostEvent, ClientboundPlayPacket, ComputeFovEvent,
     CustomPayload, Hooks, Host, KeyEvent, NativeScreenKind, ServerboundPlayPacket,
     ClientStartEvent, Flow, ScreenRenderPostEvent, ScreenKeyPressedPreEvent,
-    ScreenMouseButtonPressedPreEvent,
+    ScreenMouseButtonPressedPreEvent, MouseButtonPreEvent, MovementInputEvent,
 };
 use std::{sync::Mutex, time::Instant};
 
@@ -189,6 +189,34 @@ impl Hooks for VsClientHorizon {
         let playing = in_world(host);
         let actions = self.controls.lock().ok().map(|mut c| c.heartbeat(playing));
         if let Some(actions) = actions { send_actions(host, actions); }
+    }
+
+    fn mouse_button_pre(&self, host: &mut dyn Host, event: &mut MouseButtonPreEvent) -> Flow {
+        // Native mouse pre-events are cancellable. If a live server profile
+        // claims this button, send the semantic action BEFORE vanilla mining,
+        // attacking or using an item can consume it.
+        if !in_world(host) {return Flow::Continue;}
+        let (claimed,actions)=self.controls.lock().map(|mut c|{
+            let claimed=c.claimed_mouse(event.button);
+            let key=match event.button {
+                0=>"key.mouse.left",1=>"key.mouse.right",2=>"key.mouse.middle",_=>""
+            };
+            let actions=if claimed {c.handle_key(key,event.pressed,true)} else {vec![]};
+            (claimed,actions)
+        }).unwrap_or((false,vec![]));
+        if claimed {
+            send_actions(host,actions);
+            Flow::Cancel
+        } else {Flow::Continue}
+    }
+
+    fn movement_input(&self, _host: &dyn Host, event: &mut MovementInputEvent) {
+        if let Ok(c)=self.controls.lock(){
+            if c.claims_move(&[87,83]) {event.forward=0.0;}
+            if c.claims_move(&[65,68]) {event.strafe=0.0;}
+            if c.claims_move(&[32]) {event.jump=false;}
+            if c.claims_move(&[340,344]) {event.sneak=false;}
+        }
     }
 
     fn screen_render_post(&self, host: &dyn Host, event: &mut ScreenRenderPostEvent<'_>) {
