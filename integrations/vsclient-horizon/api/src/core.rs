@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn sends_only_advertised_capabilities_and_bounds_visual_fades() {
         assert_eq!(decode_string(&hello(),MAX_WIRE_BYTES).unwrap(),
-            "8|0.2.0-mcrust|CAMERA_V1,CONTROLS_V1,VIEW_V1");
+            "8|0.3.0-mcrust|CAMERA_V1,CONTROLS_V1,CONTROLS_UI_V1,VIEW_V1");
         let now=Instant::now();
         let mut c=CameraSession::default();
         c.accept("v1|1|0,0,64,0,0,0,0,70;4,0,64,0,0,0,0,70|cinema:fade_black,0,4,1,1,0.75;cinema:unknown,0,4,0,0,1",now).unwrap();
