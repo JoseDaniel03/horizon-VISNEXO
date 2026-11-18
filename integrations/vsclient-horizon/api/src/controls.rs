@@ -367,6 +367,8 @@ impl ControlsSession {
         let profile_id=p.id.clone();
         if !p.actions.iter().any(|a|a.id==id) {return Ok(false);}
         self.down.clear();
+        self.physical_down.clear();
+        self.touch_held=None;
         // Eliminate duplicate assignments within this profile: the edited
         // action takes precedence, leaving the previous binding unbound.
         if binding!=Binding::None {
@@ -380,7 +382,7 @@ impl ControlsSession {
     }
     pub fn clear_profile_overrides(&mut self){
         if let Some(p)=self.profile.as_ref(){self.overrides.retain(|(id,_),_|id!=&p.id);}
-        self.down.clear();self.capture=None;
+        self.down.clear();self.physical_down.clear();self.touch_held=None;self.capture=None;
     }
     pub fn bindings_wire(&self) -> String {
         let mut rows:Vec<String>=self.overrides.iter().map(|((p,a),b)|format!("{p}|{a}|{}",b.to_wire())).collect();
@@ -398,7 +400,7 @@ impl ControlsSession {
             }
             next.insert((cols[0].into(),cols[1].into()),Binding::parse(cols[2])?);
         }
-        self.overrides=next;self.down.clear();Ok(())
+        self.overrides=next;self.down.clear();self.physical_down.clear();self.touch_held=None;Ok(())
     }
     pub fn profile_id(&self) -> Option<&str> { self.profile.as_ref().map(|p| p.id.as_str()) }
 }
