@@ -199,18 +199,24 @@ pub struct ControlsSession {
     ui_page: usize,
     capture: Option<String>,
     down: HashSet<String>,
+    physical_down: HashSet<String>,
+    touch_held: Option<String>,
+    virtual_enabled: bool,
+    virtual_page: usize,
     sequence: u64,
     tick: u64,
     ready: bool,
 }
 impl ControlsSession {
-    pub fn reset(&mut self) { self.state.clear(); self.state_revision=None; self.profile=None; self.down.clear(); self.sequence=0; self.tick=0; self.ready=false; self.ui_page=0; self.capture=None; }
+    pub fn reset(&mut self) { self.state.clear(); self.state_revision=None; self.profile=None; self.down.clear(); self.physical_down.clear(); self.touch_held=None; self.virtual_page=0; self.sequence=0; self.tick=0; self.ready=false; self.ui_page=0; self.capture=None; }
     fn transition_release(&mut self) -> Vec<InputAction> {
-        let Some(profile) = self.profile.as_ref() else { self.down.clear(); return vec![] };
+        let Some(profile) = self.profile.as_ref() else { self.down.clear();self.physical_down.clear();self.touch_held=None; return vec![] };
         let releases: Vec<String> = profile.actions.iter()
             .filter(|a| a.phases & 2 != 0 && self.down.contains(&a.id))
             .map(|a| a.id.clone()).collect();
         self.down.clear();
+        self.physical_down.clear();
+        self.touch_held=None;
         releases.into_iter().map(|id| self.out(id, false)).collect()
     }
     fn out(&mut self, id: String, pressed: bool) -> InputAction {
@@ -234,6 +240,7 @@ impl ControlsSession {
         let releases = self.transition_release();
         self.profile = Some(next);
         self.ui_page=0;
+        self.virtual_page=0;
         self.capture=None;
         Ok(releases)
     }
@@ -242,16 +249,65 @@ impl ControlsSession {
         let Some(profile) = self.profile.as_ref() else {return vec![]};
         if !self.ready || self.state != profile.state {return vec![];}
         let delta:Vec<(String, u8)> = profile.actions.iter()
-            .filter(|a| self.effective_binding(&profile.id,a).matches(key) && self.down.contains(&a.id) != pressed)
+            .filter(|a| self.effective_binding(&profile.id,a).matches(key) && self.physical_down.contains(&a.id) != pressed)
             .map(|a| (a.id.clone(), a.phases)).collect();
         let mut result=Vec::new();
         for (id, phases) in delta {
-            if pressed { self.down.insert(id.clone()); } else { self.down.remove(&id); }
-            if (pressed && phases & 1 != 0) || (!pressed && phases & 2 != 0) {
-                result.push(self.out(id,pressed));
+            let was_down=self.down.contains(&id);
+            if pressed {self.physical_down.insert(id.clone());}
+            else {self.physical_down.remove(&id);}
+            let now_down=self.physical_down.contains(&id)
+                || self.touch_held.as_deref()==Some(id.as_str());
+            if was_down==now_down {continue;}
+            if now_down {self.down.insert(id.clone());}
+            else {self.down.remove(&id);}
+            if (now_down && phases & 1 != 0) || (!now_down && phases & 2 != 0) {
+                result.push(self.out(id,now_down));
             }
         }
         result
+    }
+    /// Software buttons share semantic actions and the server's sequence with
+    /// physical keys. An action stays held until both sources are released.
+    pub fn touch_press(&mut self,id:&str)->Vec<InputAction>{
+        if self.touch_held.as_deref()==Some(id){return vec![];}
+        let mut out=self.touch_release();
+        let Some(p)=self.profile.as_ref() else{return out;};
+        if !self.ready || self.state!=p.state || !self.virtual_enabled {return out;}
+        let Some(phases)=p.actions.iter().find(|a|a.id==id).map(|a|a.phases) else{return out;};
+        let was_down=self.down.contains(id);
+        self.touch_held=Some(id.to_owned());
+        self.down.insert(id.to_owned());
+        if !was_down && phases & 1!=0 {out.push(self.out(id.to_owned(),true));}
+        out
+    }
+    pub fn touch_release(&mut self)->Vec<InputAction>{
+        let Some(id)=self.touch_held.take() else{return vec![];};
+        if self.physical_down.contains(&id) {return vec![];}
+        if !self.down.remove(&id) {return vec![];}
+        let phases=self.profile.as_ref().and_then(|p|p.actions.iter()
+            .find(|a|a.id==id).map(|a|a.phases)).unwrap_or(0);
+        if phases & 2 !=0 {vec![self.out(id,false)]} else {vec![]}
+    }
+    pub fn touch_active(&self)->bool{self.touch_held.is_some()}
+    pub fn virtual_enabled(&self)->bool{self.virtual_enabled}
+    pub fn set_virtual_enabled(&mut self,enabled:bool)->Vec<InputAction>{
+        let releases=if !enabled{self.touch_release()}else{vec![]};
+        self.virtual_enabled=enabled;
+        releases
+    }
+    pub fn virtual_page(&self)->usize{self.virtual_page}
+    pub fn touch_page_step(&mut self,total:usize,page_size:usize){
+        let last=total.saturating_sub(1)/page_size.max(1);
+        self.virtual_page=if self.virtual_page>=last{0}else{self.virtual_page+1};
+    }
+    pub fn virtual_actions(&self)->Vec<(String,String,bool)>{
+        if !self.virtual_enabled || !self.ready{return vec![];}
+        let Some(p)=self.profile.as_ref() else{return vec![];};
+        if self.state!=p.state{return vec![];}
+        p.actions.iter().map(|a|{
+            (a.id.clone(),a.display_name.clone(),self.down.contains(&a.id))
+        }).collect()
     }
     pub fn release_all(&mut self) -> Vec<InputAction> { self.transition_release() }
     pub fn heartbeat(&mut self, playing: bool) -> Vec<InputAction> {
@@ -397,6 +453,24 @@ mod tests {
         assert!(s.bindings_wire().contains("virgoland:horn|k:70"));
         assert!(parse_profile("8|2|virgoland:drive|DRIVING|$|0|").is_err());
         assert_eq!(decode_label("Q2FtacOzbg").unwrap(),"Camión");
+    }
+    #[test]
+    fn virtual_touch_and_keyboard_share_action_until_both_release(){
+        let mut s=ControlsSession::default();
+        s.apply_state("8|1|DRIVING").unwrap();
+        s.apply_profile(profile()).unwrap();
+        s.set_virtual_enabled(true);
+        let id="tractor_prototipo:conduccion.forward";
+        assert_eq!(s.touch_press(id).len(),1);
+        assert!(s.handle_key("key.keyboard.w",true,true).is_empty());
+        assert!(s.touch_release().is_empty());
+        let release=s.handle_key("key.keyboard.w",false,true);
+        assert_eq!(release.len(),1);
+        assert!(!release[0].pressed);
+        assert_eq!(s.touch_press(id).len(),1);
+        let closed=s.set_virtual_enabled(false);
+        assert_eq!(closed.len(),1);
+        assert!(!closed[0].pressed);
     }
     #[test]
     fn press_release_focus_loss_and_tracked_sequence() {
