@@ -15,7 +15,7 @@ use horizon_client::mod_api::{
     CustomPayload, Hooks, Host, KeyEvent, NativeScreenKind, ServerboundPlayPacket,
     ClientStartEvent, Flow, ScreenRenderPostEvent, ScreenKeyPressedPreEvent,
     ScreenMouseButtonPressedPreEvent, MouseButtonPreEvent, MovementInputEvent,
-    CameraShakeEvent, RenderHandPoseEvent, Hand, GuiDraw, Text,
+    CameraShakeEvent, RenderHandPoseEvent, Hand, GuiDraw, Text, WorldPrimitivesEvent,
 };
 use std::{sync::Mutex, time::Instant};
 
@@ -342,6 +342,25 @@ impl Hooks for VsClientHorizon {
             }
         }
         Flow::Continue
+    }
+
+    fn world_primitives(&self, _host:&dyn Host, event:&mut WorldPrimitivesEvent<'_>) {
+        // Diagnostic storyboard only: 3D actor models and skins need a
+        // dedicated render implementation. This is invisible unless F7 is on.
+        if !self.diagnostics.lock().is_ok_and(|d|d.visible){return;}
+        let Ok(mut cinema)=self.cinematic.lock() else{return;};
+        let Some((scene,time))=cinema.active(Instant::now()) else{return;};
+        for actor in scene.actors.iter().take(16) {
+            let (pose,scale)=actor.sample(time);
+            let r=(scale as f64*0.3).max(0.05);
+            let height=(scale as f64*1.8).max(0.1);
+            let [x,y,z]=pose.pos;
+            if ![x,y,z,r,height].iter().all(|v|v.is_finite()){continue;}
+            let color=if actor.entity_id.is_some(){0xff7cdbb6}else{0xffc6a7ff};
+            event.primitives.box_outline([x-r,y,z-r],[x+r,y+height,z+r],color,1.5);
+            let id:String=actor.id.chars().take(32).collect();
+            event.primitives.text([x,y+height+0.15,z],id,color,0.6).background();
+        }
     }
 
     fn camera_shake(&self, host: &dyn Host, event: &mut CameraShakeEvent<'_>) {
