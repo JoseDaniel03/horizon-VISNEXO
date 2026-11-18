@@ -8,7 +8,7 @@ pub const CHANNEL_AUTH: &str = "virgoland:auth";
 pub const CHANNEL_CAMERA: &str = "virgoland:camera_v1";
 pub const CHANNEL_CINEMATIC: &str = "virgoland:cinematic_v3";
 pub const CHANNEL_INPUT: &str = "virgoland:input";
-pub const MAX_WIRE_BYTES: usize = 24_576;
+pub const MAX_WIRE_BYTES: usize = 32_768;
 pub const MAX_CUE_BYTES: usize = 8_192;
 pub const MAX_KEYS: usize = 64;
 pub const MAX_EFFECTS: usize = 8;
@@ -170,7 +170,7 @@ pub fn auth_ticket(ticket:&str) -> Result<Vec<u8>,&'static str> {
     encode_string(&format!("8|{ticket}"))
 }
 pub fn hello() -> Vec<u8> {
-    encode_string("8|0.2.0-mcrust|CAMERA_V1,CONTROLS_V1,VIEW_V1").expect("constant is safe")
+    encode_string("8|0.3.0-mcrust|CAMERA_V1,CONTROLS_V1,CONTROLS_UI_V1,VIEW_V1").expect("constant is safe")
 }
 #[derive(Default)]
 pub struct CameraSession {
