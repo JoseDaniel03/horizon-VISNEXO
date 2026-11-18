@@ -189,6 +189,14 @@ impl Hooks for VsClientHorizon {
             self.record(PacketKind::Render,ok);
             return;
         }
+        if channel == feedback::CHANNEL_WEAPON {
+            let ok=decode_string(&packet.data,160).ok().and_then(|text|
+                self.feedback.lock().ok().map(|mut f|
+                    f.accept_weapon(text,Instant::now()).is_ok())
+            ).unwrap_or(false);
+            self.record(PacketKind::Render,ok);
+            return;
+        }
         if channel == feedback::CHANNEL_RELOAD {
             let ok=self.feedback.lock().map(|mut f|
                 f.accept_reload(&packet.data,Instant::now()).is_ok()).unwrap_or(false);
@@ -393,7 +401,25 @@ impl Hooks for VsClientHorizon {
         Flow::Continue
     }
 
-    fn world_primitives(&self, _host:&dyn Host, event:&mut WorldPrimitivesEvent<'_>) {
+    fn world_primitives(&self, host:&dyn Host, event:&mut WorldPrimitivesEvent<'_>) {
+        // Render short-lived, server-sent VSRender shot flashes where the
+        // client's current entity snapshots put the firing entity. No
+        // dynamic light or damage logic; this is a small software effect.
+        let flashes=self.feedback.lock().map(|mut f|
+            f.visible_flashes(Instant::now())).unwrap_or_default();
+        if !flashes.is_empty() {
+            let entities=host.client_entities();
+            for (actor,color) in flashes.iter().take(256) {
+                let Some(entity)=entities.iter().find(|e|e.id==*actor) else {continue};
+                let [x,y,z]=entity.position;
+                let yaw=entity.yaw.to_radians() as f64;
+                let end=[x-yaw.sin()*0.45,y+1.3,z+yaw.cos()*0.45];
+                if !end.iter().all(|v|v.is_finite()){continue;}
+                event.primitives.filled_box(
+                    [end[0]-0.09,end[1]-0.09,end[2]-0.09],
+                    [end[0]+0.09,end[1]+0.09,end[2]+0.09],*color);
+            }
+        }
         // Diagnostic storyboard only: 3D actor models and skins need a
         // dedicated render implementation. This is invisible unless F7 is on.
         if !self.diagnostics.lock().is_ok_and(|d|d.visible){return;}
