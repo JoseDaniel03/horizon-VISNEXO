@@ -4,7 +4,8 @@ use super::controls::ControlsSession;
 use horizon_client::mod_api::{Host, ScreenRenderPostEvent, NativeScreenView};
 
 pub const ID:&str="vsclient";
-const PER_PAGE: usize=8;
+const MAX_ROWS: usize=8;
+fn per_page(b:[f32;4])->usize {(((b[3]-88.0)/24.0).floor() as usize).clamp(1,MAX_ROWS)}
 fn layout(screen: &NativeScreenView<'_>) -> [f32;4] {
     let [x,y,w,h]=screen.rect;
     let wide=(w-16.0).clamp(180.0,600.0);
@@ -25,7 +26,8 @@ pub fn click(screen:&NativeScreenView<'_>, controls:&mut ControlsSession, button
     if !within(mouse,b){return Click::None;}
     if let Some(profile)=controls.current_profile(){
         let page=controls.ui_page();
-        let action_id=profile.actions.iter().skip(page*PER_PAGE).take(PER_PAGE)
+        let per_page=per_page(b);
+        let action_id=profile.actions.iter().skip(page*per_page).take(per_page)
             .enumerate().find(|(i,_)|within(mouse,row(b,*i)))
             .map(|(_,a)|a.id.clone());
         if let Some(id)=action_id {
@@ -35,8 +37,8 @@ pub fn click(screen:&NativeScreenView<'_>, controls:&mut ControlsSession, button
     }
     let footer=b[1]+b[3]-30.0;
     if mouse[1]>=footer {
-        if mouse[0]<b[0]+b[2]*0.33 { controls.page_step(-1);return Click::Handled; }
-        if mouse[0]<b[0]+b[2]*0.66 { controls.page_step(1);return Click::Handled; }
+        if mouse[0]<b[0]+b[2]*0.33 { controls.page_step(-1,per_page(b));return Click::Handled; }
+        if mouse[0]<b[0]+b[2]*0.66 { controls.page_step(1,per_page(b));return Click::Handled; }
         controls.clear_profile_overrides();
         return Click::Save;
     }
@@ -53,8 +55,9 @@ pub fn draw(host:&dyn Host,event:&mut ScreenRenderPostEvent<'_>,controls:&Contro
     if let Some(profile)=controls.current_profile(){
         let title=format!("{} / {}",profile.display_name,profile.state);
         host.text(event.batch,&title,[b[0]+10.0,b[1]+42.0],0xffc9b5e9,false);
-        let skip=controls.ui_page()*PER_PAGE;
-        for (i,action) in profile.actions.iter().skip(skip).take(PER_PAGE).enumerate(){
+        let size=per_page(b);
+        let skip=controls.ui_page()*size;
+        for (i,action) in profile.actions.iter().skip(skip).take(size).enumerate(){
             let r=row(b,i);
             if r[1]+r[3]>b[1]+b[3]-34.0 {break;}
             let bg=if i%2==0 {0xff262a39} else {0xff1d2130};
@@ -71,7 +74,7 @@ pub fn draw(host:&dyn Host,event:&mut ScreenRenderPostEvent<'_>,controls:&Contro
             host.text(event.batch,right,[r[0]+r[2]-width-8.0,r[1]+6.0],
                 if capture {0xffffd073}else{0xff9cc9ff},false);
         }
-        let pages=profile.actions.len().div_ceil(PER_PAGE).max(1);
+        let pages=profile.actions.len().div_ceil(size).max(1);
         let counter=format!("Pagina {} / {}",controls.ui_page()+1,pages);
         host.text(event.batch,&counter,[b[0]+b[2]*0.32,b[1]+b[3]-22.0],0xffc7d5e5,false);
     }else{
