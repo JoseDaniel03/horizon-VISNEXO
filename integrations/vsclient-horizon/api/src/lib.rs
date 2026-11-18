@@ -5,7 +5,9 @@ mod cinematic;
 mod feedback;
 mod controls;
 mod ui;
+mod diagnostics;
 use core::{CameraSession, CHANNEL_CAMERA, MAX_CUE_BYTES, decode_string};
+use diagnostics::{Diagnostics,PacketKind};
 use controls::{ControlsSession, InputAction, CHANNEL_INPUT, CHANNEL_PROFILE, CHANNEL_STATE, CHANNEL_VIEW};
 use horizon_client::mod_api::{
     CameraPoseEvent, ClientDisconnectingEvent, ClientPacketEvent, GuiRenderPostEvent,
@@ -24,6 +26,7 @@ pub fn hooks() -> Box<dyn Hooks> {
         feedback: Mutex::new(feedback::Session::default()),
         controls: Mutex::new(ControlsSession::default()),
         zoom: Mutex::new(1.0),
+        diagnostics: Mutex::new(Diagnostics::default()),
     })
 }
 struct VsClientHorizon {
@@ -32,16 +35,18 @@ struct VsClientHorizon {
     feedback: Mutex<feedback::Session>,
     controls: Mutex<ControlsSession>,
     zoom: Mutex<f32>,
+    diagnostics: Mutex<Diagnostics>,
 }
-fn send_actions(host: &mut dyn Host, actions: Vec<InputAction>) {
+fn send_actions(host: &mut dyn Host, actions: Vec<InputAction>, diagnostics: &Mutex<Diagnostics>) {
     for action in actions {
         // Matches Fabric InputPayload and Bridge VirgolandInput exactly.
         let phase = if action.pressed { "press" } else { "release" };
         let wire = format!("{}|{}|{}|{}", core::PROTOCOL, action.sequence, action.id, phase);
         if let Ok(data) = core::encode_string(&wire) {
-            let _ = host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
+            let ok = host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
                 channel: CHANNEL_INPUT.into(), data,
-            }));
+            })).is_ok();
+            if let Ok(mut diag)=diagnostics.lock(){diag.sent(ok);}
         }
     }
 }
@@ -100,6 +105,11 @@ fn paint_scene(host:&dyn Host,batch:&mut horizon_client::mod_api::HudBatch,
     }
 }
 
+impl VsClientHorizon {
+    fn record(&self, kind:PacketKind, ok:bool){
+        if let Ok(mut diag)=self.diagnostics.lock(){diag.packet(kind,ok);}
+    }
+}
 impl Hooks for VsClientHorizon {
     fn client_start(&self, host: &mut dyn Host, _event: &mut ClientStartEvent) {
         if let Some(saved)=host.setting(ui::ID, "bindings") {
@@ -113,6 +123,7 @@ impl Hooks for VsClientHorizon {
         host: &mut dyn Host,
         _event: &mut ClientPlayerNetworkLoggingInEvent,
     ) {
+        if let Ok(mut diag)=self.diagnostics.lock(){diag.connect(Instant::now());}
         if let Ok(mut c) = self.camera.lock() { c.reset(); }
         if let Ok(mut c) = self.cinematic.lock() { c.reset(); }
         if let Ok(mut c) = self.controls.lock() { c.reset(); }
@@ -122,74 +133,102 @@ impl Hooks for VsClientHorizon {
         // No fake auth, no logging secrets, no disk persistence.
         if let Ok(ticket) = std::env::var("VIS_NEXO_CLIENT_BRIDGE_TICKET") {
             if let Ok(data) = core::auth_ticket(&ticket) {
-                let _ = host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
+                let sent=host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
                     channel: core::CHANNEL_AUTH.into(), data,
-                }));
+                })).is_ok();
+                if let Ok(mut diag)=self.diagnostics.lock(){diag.sent(sent);}
             }
         }
-        let _ = host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
+        let ok=host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
             channel: core::CHANNEL_HELLO.into(),
             data: core::hello(),
-        }));
+        })).is_ok();
+        if let Ok(mut diag)=self.diagnostics.lock(){diag.hello(ok);}
     }
 
     fn client_packet(&self, host: &mut dyn Host, event: &mut ClientPacketEvent<'_>) {
         let ClientboundPlayPacket::CustomPayload(packet) = event.packet else { return };
         let channel = packet.channel.as_str();
         if channel == feedback::CHANNEL_EFFECT {
-            if let Ok(text)=decode_string(&packet.data,128){
-                if let Ok(mut f)=self.feedback.lock(){let _=f.accept_effect(text,Instant::now());}
-            }
+            let ok=decode_string(&packet.data,128).ok().and_then(|text|
+                self.feedback.lock().ok().map(|mut f|f.accept_effect(text,Instant::now()).is_ok())
+            ).unwrap_or(false);
+            self.record(PacketKind::Render,ok);
             return;
         }
         if channel == feedback::CHANNEL_RELOAD {
-            if let Ok(mut f)=self.feedback.lock(){
-                let _=f.accept_reload(&packet.data,Instant::now());
-            }
+            let ok=self.feedback.lock().map(|mut f|
+                f.accept_reload(&packet.data,Instant::now()).is_ok()).unwrap_or(false);
+            self.record(PacketKind::Render,ok);
             return;
         }
         let max = if channel == CHANNEL_PROFILE || channel == cinematic::CHANNEL { 30_000 } else { MAX_CUE_BYTES };
         if !matches!(channel, CHANNEL_CAMERA | CHANNEL_STATE | CHANNEL_PROFILE | CHANNEL_VIEW | "virgoland:controls" | cinematic::CHANNEL) {
             return;
         }
-        let Ok(text) = decode_string(&packet.data, max) else { return };
+        let kind=match channel{
+            CHANNEL_CAMERA=>PacketKind::Camera,
+            CHANNEL_STATE=>PacketKind::State,
+            CHANNEL_PROFILE=>PacketKind::Profile,
+            CHANNEL_VIEW=>PacketKind::View,
+            cinematic::CHANNEL=>PacketKind::Cinematic,
+            _=>PacketKind::Controls,
+        };
+        let Ok(text) = decode_string(&packet.data, max) else {
+            self.record(kind,false);
+            return;
+        };
         match channel {
             cinematic::CHANNEL => {
                 let accepted=self.cinematic.lock().is_ok_and(|mut c|c.accept(text,Instant::now()).is_ok());
+                self.record(PacketKind::Cinematic,accepted);
                 if accepted {
                     if let Ok(mut camera)=self.camera.lock(){camera.reset();}
                 }
             }
             CHANNEL_CAMERA => {
-                if let Ok(mut c) = self.camera.lock() {
-                    let _ = c.accept(text, Instant::now());
-                }
+                let accepted=self.camera.lock().map(|mut c|
+                    c.accept(text,Instant::now()).is_ok()).unwrap_or(false);
+                self.record(PacketKind::Camera,accepted);
             }
             CHANNEL_STATE => {
                 let actions = self.controls.lock().ok()
                     .and_then(|mut c| c.apply_state(text).ok());
-                if let Some(actions) = actions { send_actions(host,actions); }
+                let accepted=actions.is_some();
+                if let Some(actions) = actions { send_actions(host,actions,&self.diagnostics); }
+                self.record(kind,accepted);
             }
             CHANNEL_PROFILE => {
                 let actions = self.controls.lock().ok()
                     .and_then(|mut c| c.apply_profile(text).ok());
-                if let Some(actions) = actions { send_actions(host,actions); }
+                if let Some(actions) = actions { send_actions(host,actions,&self.diagnostics); }
             }
             "virgoland:controls" => {
-                if text=="8|open" {
-                    let _=host.mod_screen_open(ui::ID);
-                }
+                let accepted=text=="8|open" && host.mod_screen_open(ui::ID);
+                self.record(PacketKind::Controls,accepted);
             }
             CHANNEL_VIEW => {
-                if let Ok(zoom) = controls::parse_view(text) {
-                    if let Ok(mut current) = self.zoom.lock() { *current = zoom; }
-                }
+                let accepted=controls::parse_view(text).ok().and_then(|zoom|
+                    self.zoom.lock().ok().map(|mut current|{*current=zoom;})).is_some();
+                self.record(PacketKind::View,accepted);
             }
             _ => {}
         }
     }
 
     fn key(&self, host: &mut dyn Host, event: &mut KeyEvent<'_>) {
+        if event.pressed && in_world(host) && event.key=="key.keyboard.f7" {
+            if let Ok(mut d)=self.diagnostics.lock(){d.toggle();}
+            return;
+        }
+        if event.pressed && in_world(host) && event.key=="key.keyboard.f6" {
+            if let Ok(d)=self.diagnostics.lock() {
+                if d.visible {
+                    host.set_setting(ui::ID,"last_diagnostic",&d.report(Instant::now()));
+                }
+            }
+            return;
+        }
         if event.pressed && event.key=="key.keyboard.f8" && in_world(host) {
             let _=host.mod_screen_open(ui::ID);
             return;
@@ -197,7 +236,7 @@ impl Hooks for VsClientHorizon {
         let playing = in_world(host);
         let actions = self.controls.lock().ok()
             .map(|mut c| c.handle_key(event.key, event.pressed, playing));
-        if let Some(actions) = actions { send_actions(host, actions); }
+        if let Some(actions) = actions { send_actions(host, actions, &self.diagnostics); }
     }
 
     fn client_tick_post(&self, host: &mut dyn Host, _event: &mut ClientTickPostEvent) {
@@ -369,9 +408,21 @@ impl Hooks for VsClientHorizon {
                 host.fill(event.batch,[0.0,0.0,width,height],color);
             }
         }
+        if let Ok(d)=self.diagnostics.lock() {
+            if d.visible {
+                let lines=d.lines(Instant::now());
+                let box_height=18.0+lines.len() as f32*12.0;
+                host.fill(event.batch,[8.0,8.0,width.min(510.0)-16.0,box_height],0xe4182031);
+                for (i,line) in lines.iter().enumerate() {
+                    host.text(event.batch,line,[16.0,17.0+i as f32*12.0],
+                        if i==0 {0xffaeebba}else{0xffd8e2ef},true);
+                }
+            }
+        }
     }
 
     fn client_disconnecting(&self, _host: &dyn Host, _event: &mut ClientDisconnectingEvent) {
+        if let Ok(mut diag)=self.diagnostics.lock(){diag.disconnect();}
         if let Ok(mut c) = self.camera.lock() { c.reset(); }
         if let Ok(mut c) = self.cinematic.lock() { c.reset(); }
         if let Ok(mut c) = self.controls.lock() { c.reset(); }
