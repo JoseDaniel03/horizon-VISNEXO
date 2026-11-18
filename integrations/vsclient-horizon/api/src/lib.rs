@@ -440,13 +440,26 @@ impl Hooks for VsClientHorizon {
 
     fn camera_shake(&self, host: &dyn Host, event: &mut CameraShakeEvent<'_>) {
         if !in_world(host) {return;}
-        // Scene cameras exclude weapon recoil, matching Fabric behaviour.
-        if self.cinematic.lock().ok()
-            .is_some_and(|mut c|c.active(Instant::now()).is_some_and(|(s,_)|s.primary_camera(0.0).is_some())) {
-            return;
+        let now=Instant::now();
+        // Horizon exposes only yaw/pitch for the render camera, so its bounded
+        // visual shake layer handles roll. Respect the engine's 10-degree and
+        // distortion-settings limits; it cannot exactly match Fabric's roll.
+        if let Ok(mut cinema)=self.cinematic.lock() {
+            if let Some((scene,time))=cinema.active(now) {
+                if let Some(pose)=scene.primary_camera(time) {
+                    event.shake.roll+=pose.roll.clamp(-10.0,10.0);
+                    return;
+                }
+            }
+        }
+        if let Ok(mut camera)=self.camera.lock() {
+            if let Some(pose)=camera.sample(now) {
+                event.shake.roll+=pose.roll.clamp(-10.0,10.0);
+                return;
+            }
         }
         if let Ok(mut f)=self.feedback.lock(){
-            let recoil=f.sample(Instant::now());
+            let recoil=f.sample(now);
             event.shake.pitch+=recoil.pitch;
             event.shake.yaw+=recoil.yaw;
         }
