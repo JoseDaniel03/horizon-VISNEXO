@@ -1,18 +1,23 @@
 //! Native, bounded camera impulses and first-person reload cues from VSRender.
 //! No ammo, attack or inventory state is modified; the server owns gameplay.
 use std::time::{Duration,Instant};
+use std::collections::HashMap;
 pub const CHANNEL_EFFECT:&str="vsrender:action_effect";
 pub const CHANNEL_RELOAD:&str="vsrender:reload_arms";
+pub const CHANNEL_WEAPON:&str="vsrender:weapon_feedback";
 #[derive(Clone,Copy,Debug,Default,PartialEq)]
 pub struct Offset{pub pitch:f32,pub yaw:f32,pub fov:f32}
 #[derive(Clone,Debug)]
 struct Pulse{pitch:f32,yaw:f32,shake:f32,fov:f32,start:Instant,duration:Duration}
 #[derive(Clone,Debug)]
 struct Reload{start:Instant,duration:Duration,slot:u8}
+#[derive(Clone,Debug)]
+struct Flash{light:u8,start:Instant,duration:Duration}
 #[derive(Default)]
 pub struct Session{
     pulses:Vec<Pulse>,
     reload:Option<Reload>,
+    flashes:HashMap<u32,Flash>,
 }
 impl Session{
     pub fn accept_effect(&mut self,wire:&str,now:Instant)->Result<(),&'static str>{
@@ -51,6 +56,37 @@ impl Session{
         o.fov=o.fov.clamp(-20.0,20.0);
         o
     }
+    pub fn accept_weapon(&mut self,wire:&str,now:Instant)->Result<(),&'static str>{
+        if wire.len()>160{return Err("Weapon packet too long");}
+        let cols:Vec<&str>=wire.split('|').collect();
+        if cols.len()!=7 || cols[0]!="1"{return Err("Invalid weapon feedback version");}
+        let actor=cols[1].parse::<u32>().map_err(|_|"Invalid weapon entity")?;
+        let pitch=cols[2].parse::<f32>().map_err(|_|"Invalid weapon pitch")?;
+        let yaw=cols[3].parse::<f32>().map_err(|_|"Invalid weapon yaw")?;
+        let recovery=cols[4].parse::<u8>().map_err(|_|"Invalid weapon recovery")?;
+        let light=cols[5].parse::<u8>().map_err(|_|"Invalid weapon light")?;
+        let ticks=cols[6].parse::<u8>().map_err(|_|"Invalid weapon flash")?;
+        if !pitch.is_finite()||!yaw.is_finite()||!(0.0..=12.0).contains(&pitch)
+            ||yaw.abs()>12.0||!(1..=60).contains(&recovery)
+            ||light>15||!(1..=6).contains(&ticks){
+            return Err("Unsafe weapon feedback");
+        }
+        self.flashes.retain(|_,f|now.saturating_duration_since(f.start)<Duration::from_millis(300));
+        if self.flashes.len()>=256 && !self.flashes.contains_key(&actor){
+            return Err("Weapon flash budget");
+        }
+        self.flashes.insert(actor,Flash{light,start:now,
+            duration:Duration::from_millis(u64::from(ticks)*50)});
+        Ok(())
+    }
+    pub fn visible_flashes(&mut self,now:Instant)->Vec<(u32,u32)>{
+        self.flashes.retain(|_,f|now.saturating_duration_since(f.start)<f.duration);
+        self.flashes.iter().filter(|(_,flash)|flash.light>0)
+            .map(|(&id,flash)|{
+                let alpha=u32::from(flash.light)*17;
+                (id,(alpha<<24)|0x00ffb34f)
+            }).collect()
+    }
     pub fn accept_reload(&mut self,raw:&[u8],now:Instant)->Result<(),&'static str>{
         let (version,ticks,slot)=decode_reload(raw)?;
         if version!=1{return Err("Invalid reload version");}
@@ -68,7 +104,7 @@ impl Session{
         if p<0.35 {smooth(p/0.35)}else if p<0.65{1.0}
         else{1.0-smooth((p-0.65)/0.35)}
     }
-    pub fn reset(&mut self){self.pulses.clear();self.reload=None;}
+    pub fn reset(&mut self){self.pulses.clear();self.reload=None;self.flashes.clear();}
     pub fn active_reload_slot(&self)->Option<u8>{self.reload.as_ref().map(|r|r.slot)}
 }
 fn read_varint(data:&[u8],offset:&mut usize)->Result<i32,&'static str>{
@@ -106,6 +142,18 @@ mod tests{
         let p=s.sample(now+Duration::from_millis(125));
         assert!(p.pitch.abs()<=12.0&&p.yaw.abs()<=8.0&&p.fov.abs()<=20.0);
         assert_eq!(s.sample(now+Duration::from_secs(2)),Offset::default());
+    }
+    #[test]
+    fn weapon_packets_match_fabric_bounds_and_expire(){
+        let now=Instant::now();
+        let mut s=Session::default();
+        assert!(s.accept_weapon("1|123|4|2|8|15|3",now).is_ok());
+        assert_eq!(s.visible_flashes(now)[0].0,123);
+        assert!(s.visible_flashes(now+Duration::from_millis(180)).is_empty());
+        for invalid in ["1|-1|4|2|8|15|3","1|2|NaN|2|8|15|3",
+            "1|2|13|0|8|15|3","1|2|2|0|8|16|3","1|2|2|0|8|15|7"] {
+            assert!(s.accept_weapon(invalid,now).is_err(),"{invalid}");
+        }
     }
     #[test]
     fn reload_varints_are_exact_and_timed(){
