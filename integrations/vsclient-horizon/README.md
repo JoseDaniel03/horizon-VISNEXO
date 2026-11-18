@@ -5,27 +5,27 @@ renombrado. Se compila dentro del cliente Rust de la instancia usando el
 sistema de mods nativos [api] de Horizon. Minecraft Java Edition conserva
 el VSClient Fabric y sus servicios de servidor originales.
 
-## Estado — segunda adaptación funcional (revisión pendiente de CI y QA real)
+## Estado — tercera adaptación funcional (pendiente QA real en Android/PC)
 
 | Función | MCRust |
 |---|---|
 | Protocolo 8, Minecraft VarInt + UTF-8 | Implementado y probado |
 | Canal virgoland:auth, ticket de una sesión VIS Nexo | Soporte de envío opcional; requiere que Nexo suministre el ticket |
-| Canal virgoland:hello; capacidades | Anuncia CAMERA_V1, CONTROLS_V1 y VIEW_V1 |
+| Canal virgoland:hello; capacidades | Anuncia CAMERA_V1, CONTROLS_V1, CONTROLS_UI_V1 y VIEW_V1 |
 | Canal virgoland:camera_v1; 64 keyframes y revisión creciente | Implementado |
 | Cámara visual: posición, yaw, pitch | Hook nativo |
 | FOV cinematográfico | Hook nativo |
 | Smoothstep, ángulo más corto, expiración, reinicio | Implementado |
-| cinematic_v3, timeline y edición completas | Pendiente |
+| cinematic_v3 | Parser validado; cámara principal, subtítulos y efectos GUI. Multivista/actores 3D pendientes, no se anuncia al Bridge |
 | Roll independiente del filtro de distorsión | Pendiente |
 | Filtros GPU y multicámara | Pendientes; se mantienen deshabilitados |
-| Controles del Bridge | Recibe state/profile; envía press/release con secuencia; libera al perder foco y cambiar estado |
-| BBModel, animaciones, brazos, armas y feedback | Pendiente |
-| HUD y overlays | Fades blanco/negro y bandas de software; interfaz completa pendiente |
+| Controles del Bridge | State/profile; press/release; antirreplay; suprime mouse y movimiento tomados por acciones |
+| Brazos, armas y feedback | Recoil/action_effect y recarga de brazos local; BBModel, animación de actores y destellos por entidad pendientes |
+| HUD y overlays | Fades, bandas, efectos V3 básicos y subtítulos de texto; interfaz nativa de controles con F8 y guardado local |
 | VIS Ceibo, skins y cuentas | Pendiente de Nexo/servicios |
 | Android ARM64 | Aún no compilado ni probado |
 
-El adaptador anuncia CAMERA_V1, CONTROLS_V1 y VIEW_V1, pero todavía no ofrece la pantalla de reasignación ni controles táctiles específicos de VSClient. No anuncia CONTROLS_UI_V1, VEHICLE_INPUT_V1,
+El adaptador anuncia CAMERA_V1, CONTROLS_V1, CONTROLS_UI_V1 y VIEW_V1. La pantalla nativa de controles se abre con F8 o por mensaje del Bridge, permite reasignar teclas, eliminar una asignación con Supr y restaurar los controles. Los cambios se guardan por instancia/perfil. Todavía no hay botones táctiles propios de VSClient. No anuncia VEHICLE_INPUT_V1,
 CINEMATIC_V3 ni otras funcionalidades pendientes. La cámara y el FOV no
 alteran el movimiento ni la autoridad del servidor.
 
@@ -35,7 +35,10 @@ alteran el movimiento ni la autoridad del servidor.
 - api/Cargo.toml: crate Rust para compilar con Horizon.
 - api/src/lib.rs: hooks de login, paquetes, cámara, FOV y salida.
 - api/src/core.rs: codec y timeline sin dependencias Fabric/Horizon.
-- api/src/controls.rs: contrato de perfiles y acciones, con pruebas standalone.
+- api/src/controls.rs: contrato de perfiles y acciones, reasignación persistida, con pruebas standalone.
+- api/src/ui.rs: ventana nativa paginada para teclado/ratón, con entrada por el Bridge.
+- api/src/cinematic.rs: decoder validado de frames V3 y simulación limitada de presentación.
+- api/src/feedback.rs: efectos visuales VSRender y cinemática de recarga de brazos.
 - api/src/lib.rs: recibe canales state/profile/view, usa hooks nativos para input y dibujo de overlays.
 - crates/horizon-client/tests/vsclient_native_port.rs: compila contra Hooks.
 
@@ -90,7 +93,7 @@ directamente en el entorno de su proceso hijo y limitar su vida útil.
 
 ## Validación
 
-El workflow visclient-native.yml compila y ejecuta tests de protocolo/cámara/controles,
+El workflow visclient-native.yml compila y ejecuta tests de protocolo/cámara/controles/feedback,
 comprueba el adapter contra la API real de Horizon y genera el bundle de
 fuentes. Eso **no equivale a una prueba gráfica en MCRust**.
 
@@ -101,3 +104,17 @@ El Bridge envía el perfil contextual al cliente. Este port procesa los códigos
 Los efectos de software actuales son `cinema:fade_black`, `cinema:black`, `cinema:fade_white`, `cinema:flash_white` y `cinema:letterbox`. No son filtros GPU ni Cinematic V3. Un servidor que requiere `launcher-auth.enabled` todavía necesita un ticket firmado real de VIS Nexo, no basta el hello.
 
 **Aún falta para paridad completa con Java:** cinemáticas V3 multivista, actores/skins/BBModel/animaciones, transiciones completas, menús de controles, personalización persistente de bindings, gamepad y entrada táctil específica, HUD de diagnósticos y pruebas de rendimiento Android. No deben anunciarse capacidades de esas funciones sin implementarlas y probarlas.
+
+## Uso directo 0.3
+
+- Abrir **F8** durante el juego o desde el mensaje de apertura `virgoland:controls` del servidor.
+- Clic en una acción, luego tecla/botón a asignar. **Supr/Backspace** desasigna; **Esc** cancela la captura.
+- Anterior/Siguiente navega las acciones disponibles. **Restaurar** limpia overrides del perfil actual.
+- Las preferencias viven bajo la carpeta de datos nativos de VSClient dentro de la **instancia** de Horizon. No se comparten con otras cuentas/instancias por defecto.
+- Al cambiar el perfil/estado, abrir un menú, perder foco o desconectar se liberan acciones mantenidas. El ratón asignado a una acción contextual cancela el clic Vanilla correspondiente, y la entrada de movimiento ligada a controles del servidor no mueve al jugador de forma accidental.
+
+## Compatibilidad real con cinemáticas
+
+Se interpreta el JSON V3 con presupuesto de 5 vistas, 16 actores, 16 subtítulos y 8 efectos, verificando keyframes, revisiones, tiempos y geometría. **Por ahora solo se puede renderizar la cámara principal del mundo**, efectos GUI básicos y una línea de texto de cada subtítulo; falta capturar y componer las otras cuatro vistas y aplicar los rig/skins animados de actores. El renderer nativo de Horizon no proporciona ese compositor directamente por el protocolo del Bridge, por lo que **NO se anuncian CINEMATIC_V3 ni CINEMATIC_TRANSITIONS_V1**. Los mensajes V3 pueden recibirse de manera experimental, pero esto no garantiza que escenas antiguas reproduzcan igual que en Fabric.
+
+La recarga de brazos `vsrender:reload_arms` y los impulsos `vsrender:action_effect` son estrictamente visuales. El estado de slots, la mano activa y las animaciones de entidad todavía requieren integración con el renderer y no deberían considerarse equivalentes a la versión Java. Los tests de cargo/check no prueban la composición de GPU ni la compatibilidad Android ARM64.
