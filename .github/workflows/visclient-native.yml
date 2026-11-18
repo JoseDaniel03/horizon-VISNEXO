@@ -87,3 +87,74 @@ jobs:
       - name: Compile VSClient adapter against Horizon's real native hook trait
         run: |
           cargo check --locked -p horizon-client --test vsclient_native_port --no-default-features
+
+  package:
+    name: Installable .hnmod
+    needs: [protocol, native-api]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Package the actual Horizon native mod
+        env:
+          HORIZON_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p dist
+          python3 integrations/vsclient-horizon/package_native.py \
+            --horizon "$HORIZON_SHA" \
+            --out dist/VSClient-MCRust-0.4.0.hnmod
+          sha256sum dist/VSClient-MCRust-0.4.0.hnmod | tee dist/SHA256SUMS.txt
+          cat > dist/INSTALAR.txt <<'EOF'
+          VSCLIENT MCRUST 0.4.0 - MOD NATIVO HORIZON
+          ============================================
+          Archivo: VSClient-MCRust-0.4.0.hnmod
+          No es un .jar de Fabric ni una APK. Horizon compila este mod nativo
+          con el cliente de Minecraft Rust en la instancia elegida.
+          Para instalarlo manualmente, descomprimí este .hnmod como ZIP a
+          una carpeta que contenga horizon-native.json y mixins/vsclient/,
+          y usá la acción "Native build" de Horizon o su comando:
+            horizon-launcher native-build CARPETA --instance INSTANCIA --trust-native-code
+          SOLO funciona con una versión del motor que incluya los hooks y los
+          CustomPayload necesarios. El launcher Horizon upstream puede descargar
+          código de horizon-rust/horizon, no el fork de VIS. Si la versión difiere,
+          no instales encima de tus mundos: usá una instancia separada.
+          Funciones: cámaras V1, FOV/zoom, controles de servidor, interfaz y
+          acciones táctiles, V3 experimental, efectos VSRender y diagnóstico.
+          No verificado dentro del juego ni en Android ARM64. El compositor
+          multicámara y los actores BBModel completos siguen pendientes.
+          Revisá el código: es nativo y requiere tu aprobación expresa.
+          EOF
+      - name: Validate with Horizon's real .hnmod bundle reader
+        env:
+          HORIZON_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p crates/horizon-mods/tests
+          cat > crates/horizon-mods/tests/vsclient_package_ci.rs <<'EOF'
+          #[test]
+          fn accepts_vsclient_native_mod_manifest_and_source_files() {
+              let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                  .join("../../dist/VSClient-MCRust-0.4.0.hnmod");
+              let bundle = horizon_mods::index::native::Bundle::read(&path)
+                  .expect("Horizon must accept the installable .hnmod archive");
+              assert_eq!(bundle.manifest.id, "vsclient");
+              assert_eq!(bundle.manifest.version, "0.4.0");
+              assert_eq!(bundle.manifest.game, "26.3");
+              assert_eq!(bundle.manifest.hooks, Some(415));
+              assert_eq!(bundle.manifest.horizon, std::env::var("HORIZON_SHA").unwrap());
+              assert!(bundle.files.contains_key("mixins/vsclient/api/src/lib.rs"));
+              assert!(bundle.files.contains_key("mixins/vsclient/horizon-mixin.toml"));
+          }
+          EOF
+          cargo test --locked -p horizon-mods --test vsclient_package_ci -- --nocapture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VSClient-MCRust-0.4.0-HNMOD
+          path: |
+            dist/VSClient-MCRust-0.4.0.hnmod
+            dist/SHA256SUMS.txt
+            dist/INSTALAR.txt
+          retention-days: 30
+          if-no-files-found: error
