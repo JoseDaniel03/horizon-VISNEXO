@@ -215,10 +215,13 @@ impl Session {
         Ok(())
     }
     pub fn active(&mut self,now:Instant)->Option<(&Scene,f64)>{
-        let (start,scene)=self.current.as_ref()?;
-        let elapsed=now.saturating_duration_since(*start).as_secs_f64();
-        if elapsed>scene.duration(){self.current=None;return None;}
-        Some((scene,elapsed))
+        // Test expiration before borrowing a scene to return it; otherwise
+        // clearing the owned Option conflicts with the returned reference.
+        let expired=self.current.as_ref().is_some_and(|(start,scene)|
+            now.saturating_duration_since(*start).as_secs_f64()>scene.duration());
+        if expired {self.current=None;return None;}
+        self.current.as_ref().map(|(start,scene)|
+            (scene,now.saturating_duration_since(*start).as_secs_f64()))
     }
     pub fn reset(&mut self){self.current=None;self.last_revision=None;}
 }
