@@ -4,7 +4,7 @@
 # selected VIS Nexo/Horizon instance, including the native payload API.
 [mod]
 id = "vsclient"
-version = "0.3.0"
+version = "0.4.0"
 
 [api]
 path = "api"
