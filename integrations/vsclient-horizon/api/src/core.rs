@@ -170,7 +170,7 @@ pub fn auth_ticket(ticket:&str) -> Result<Vec<u8>,&'static str> {
     encode_string(&format!("8|{ticket}"))
 }
 pub fn hello() -> Vec<u8> {
-    encode_string("8|0.3.0-mcrust|CAMERA_V1,CONTROLS_V1,CONTROLS_UI_V1,VIEW_V1").expect("constant is safe")
+    encode_string("8|0.4.0-mcrust|CAMERA_V1,CONTROLS_V1,CONTROLS_UI_V1,VIEW_V1").expect("constant is safe")
 }
 #[derive(Default)]
 pub struct CameraSession {
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn sends_only_advertised_capabilities_and_bounds_visual_fades() {
         assert_eq!(decode_string(&hello(),MAX_WIRE_BYTES).unwrap(),
-            "8|0.3.0-mcrust|CAMERA_V1,CONTROLS_V1,CONTROLS_UI_V1,VIEW_V1");
+            "8|0.4.0-mcrust|CAMERA_V1,CONTROLS_V1,CONTROLS_UI_V1,VIEW_V1");
         let now=Instant::now();
         let mut c=CameraSession::default();
         c.accept("v1|1|0,0,64,0,0,0,0,70;4,0,64,0,0,0,0,70|cinema:fade_black,0,4,1,1,0.75;cinema:unknown,0,4,0,0,1",now).unwrap();
