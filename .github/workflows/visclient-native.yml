@@ -148,7 +148,7 @@ jobs:
               assert!(bundle.files.contains_key("mixins/vsclient/horizon-mixin.toml"));
           }
           EOF
-          cargo test --locked -p horizon-mods --test vsclient_package_ci -- --nocapture
+          cargo test --locked -p horizon-mods --features index --test vsclient_package_ci -- --nocapture
       - uses: actions/upload-artifact@v4
         with:
           name: VSClient-MCRust-0.4.0-HNMOD
