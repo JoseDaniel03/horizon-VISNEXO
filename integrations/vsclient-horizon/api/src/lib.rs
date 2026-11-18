@@ -15,7 +15,7 @@ use horizon_client::mod_api::{
     CustomPayload, Hooks, Host, KeyEvent, NativeScreenKind, ServerboundPlayPacket,
     ClientStartEvent, Flow, ScreenRenderPostEvent, ScreenKeyPressedPreEvent,
     ScreenMouseButtonPressedPreEvent, MouseButtonPreEvent, MovementInputEvent,
-    CameraShakeEvent, RenderHandPoseEvent, Hand,
+    CameraShakeEvent, RenderHandPoseEvent, Hand, GuiDraw, Text,
 };
 use std::{sync::Mutex, time::Instant};
 
@@ -60,6 +60,16 @@ fn in_world(host: &dyn Host) -> bool {
 fn paint_scene(host:&dyn Host,batch:&mut horizon_client::mod_api::HudBatch,
     scene:&cinematic::Scene,width:f32,height:f32)
 {
+    if let Some(view)=scene.views.first() {
+        if let Some(fade)=&view.fade {
+            let opacity=(fade.amount.clamp(0.0,1.0)*255.0).round() as u32;
+            if opacity>0 {
+                let r=&view.rect;
+                host.fill(batch,[r.x*width,r.y*height,r.w*width,r.h*height],
+                    (opacity<<24)|(fade.color&0xffffff));
+            }
+        }
+    }
     for e in &scene.effects {
         let alpha=(e.amount.clamp(0.0,1.0)*255.0).round() as u32;
         if alpha==0 {continue;}
@@ -89,20 +99,33 @@ fn paint_scene(host:&dyn Host,batch:&mut horizon_client::mod_api::HudBatch,
             }
         }
     }
+    // The GUI API accepts alpha-colored rich draw calls. Limit each caption
+    // to eight lines and 200 Unicode scalars per line so a server cannot turn
+    // this into an unbounded glyph-extraction workload.
+    let mut draws=Vec::new();
     for c in &scene.captions {
-        if c.opacity<=0.0 {continue;}
-        // Text uses Horizon's current resource-pack glyph atlas. For now the
-        // native API exposes unscaled opaque text, so use the original color
-        // and horizontal anchoring without claiming Java's full typography.
-        let line=c.text.lines().next().unwrap_or("");
-        let text:String=line.chars().take(200).collect();
-        let advance=host.text_width(&text);
-        let x=c.x*width - match c.align.as_str(){
-            "center"=>advance*0.5,"right"=>advance,_=>0.0
-        };
-        let y=c.y*height;
-        host.text(batch,&text,[x,y],c.color&0xffffff,true);
+        let alpha=(c.opacity.clamp(0.0,1.0)*255.0).round() as u32;
+        if alpha==0 {continue;}
+        let rgb=(alpha<<24)|(c.color&0xffffff);
+        let x=c.x*width;
+        let top=c.y*height;
+        for (row,line) in c.text.lines().take(8).enumerate() {
+            let label:String=line.chars().take(200).collect();
+            let advance=host.text_width(&label);
+            let left=x-match c.align.as_str() {
+                "center"=>advance*0.5,"right"=>advance,_=>0.0,
+            };
+            draws.push(GuiDraw::Text {
+                text:Text::literal(&label),
+                x:left.round() as i32,
+                y:(top+row as f32*10.0).round() as i32,
+                color:rgb,
+                shadow:true,
+            });
+        }
     }
+    if !draws.is_empty(){host.gui_paint(batch,&draws);}
+
 }
 
 impl VsClientHorizon {
