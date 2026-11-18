@@ -6,6 +6,7 @@ mod feedback;
 mod controls;
 mod ui;
 mod diagnostics;
+mod touch;
 use core::{CameraSession, CHANNEL_CAMERA, MAX_CUE_BYTES, decode_string};
 use diagnostics::{Diagnostics,PacketKind};
 use controls::{ControlsSession, InputAction, CHANNEL_INPUT, CHANNEL_PROFILE, CHANNEL_STATE, CHANNEL_VIEW};
@@ -24,7 +25,11 @@ pub fn hooks() -> Box<dyn Hooks> {
         camera: Mutex::new(CameraSession::default()),
         cinematic: Mutex::new(cinematic::Session::default()),
         feedback: Mutex::new(feedback::Session::default()),
-        controls: Mutex::new(ControlsSession::default()),
+        controls: Mutex::new({
+            let mut controls=ControlsSession::default();
+            let _=controls.set_virtual_enabled(cfg!(target_os="android"));
+            controls
+        }),
         zoom: Mutex::new(1.0),
         diagnostics: Mutex::new(Diagnostics::default()),
     })
@@ -140,6 +145,11 @@ impl Hooks for VsClientHorizon {
                 let _=controls.load_bindings(&saved);
             }
         }
+        if let Some(enabled)=host.setting(ui::ID,"virtual_enabled"){
+            if let Ok(mut controls)=self.controls.lock(){
+                let _=controls.set_virtual_enabled(enabled=="1");
+            }
+        }
     }
     fn client_player_network_logging_in(
         &self,
@@ -252,6 +262,16 @@ impl Hooks for VsClientHorizon {
             }
             return;
         }
+        if event.pressed && event.key=="key.keyboard.f9" && in_world(host) {
+            let (enabled,actions)=self.controls.lock().map(|mut c|{
+                let next=!c.virtual_enabled();
+                let actions=c.set_virtual_enabled(next);
+                (next,actions)
+            }).unwrap_or((false,vec![]));
+            host.set_setting(ui::ID,"virtual_enabled",if enabled{"1"}else{"0"});
+            send_actions(host,actions,&self.diagnostics);
+            return;
+        }
         if event.pressed && event.key=="key.keyboard.f8" && in_world(host) {
             let _=host.mod_screen_open(ui::ID);
             return;
@@ -278,6 +298,35 @@ impl Hooks for VsClientHorizon {
         // claims this button, send the semantic action BEFORE vanilla mining,
         // attacking or using an item can consume it.
         if !in_world(host) {return Flow::Continue;}
+        if event.button==0 {
+            let gui=host.client_state().map_or([0.0,0.0],|s|s.gui_size);
+            let cursor=host.cursor();
+            let (actions,handled)=self.controls.lock().map(|mut c|{
+                if !event.pressed && c.touch_active() {
+                    return (c.touch_release(),true);
+                }
+                if event.pressed && c.virtual_enabled() {
+                    let available=c.virtual_actions();
+                    match touch::hit(cursor,available.len(),c.virtual_page(),gui) {
+                        touch::Hit::Action(i)=>{
+                            if let Some((id,_,_))=available.get(i) {
+                                return (c.touch_press(id),true);
+                            }
+                        }
+                        touch::Hit::Page=>{
+                            c.touch_page_step(available.len(),touch::page_size(gui));
+                            return (vec![],true);
+                        }
+                        touch::Hit::None=>{}
+                    }
+                }
+                (vec![],false)
+            }).unwrap_or((vec![],false));
+            if handled {
+                send_actions(host,actions,&self.diagnostics);
+                return Flow::Cancel;
+            }
+        }
         if event.button==0 && event.pressed
             && host.client_state().is_some_and(|s|!s.gui_hidden)
             && host.client_state().is_some_and(|s|ui::in_button(host.cursor(),s.gui_size[0]))
@@ -440,6 +489,27 @@ impl Hooks for VsClientHorizon {
             let b=ui::button_rect(width);
             host.fill(event.batch,b,0xdf302740);
             host.text(event.batch,"VS",[b[0]+17.0,b[1]+9.0],0xffefe1ff,true);
+        }
+        if !state.gui_hidden {
+            if let Ok(c)=self.controls.lock(){
+                let available=c.virtual_actions();
+                if !available.is_empty(){
+                    let gui=[width,height];
+                    for slot in touch::slots(available.len(),c.virtual_page(),gui){
+                        let Some((_,label,held))=available.get(slot.index) else{continue};
+                        host.fill(event.batch,slot.rect,
+                            if *held {0xe9865fb2} else {0xdf282e47});
+                        let shortened:String=label.chars().take(12).collect();
+                        host.text(event.batch,&shortened,[slot.rect[0]+6.0,
+                            slot.rect[1]+slot.rect[3]*0.5-4.0],0xfff4efff,true);
+                    }
+                    if let Some(b)=touch::page_rect(available.len(),gui){
+                        host.fill(event.batch,b,0xdf363047);
+                        host.text(event.batch,"Mas controles >",
+                            [b[0]+5.0,b[1]+8.0],0xfff0e9ff,false);
+                    }
+                }
+            }
         }
         // Render the bounded V3 effects/captions even for clients whose
         // server sends scenes without relying on capability negotiation.
