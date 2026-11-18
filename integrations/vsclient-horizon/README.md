@@ -5,7 +5,7 @@ renombrado. Se compila dentro del cliente Rust de la instancia usando el
 sistema de mods nativos [api] de Horizon. Minecraft Java Edition conserva
 el VSClient Fabric y sus servicios de servidor originales.
 
-## Estado — tercera adaptación funcional (pendiente QA real en Android/PC)
+## Estado — cuarta adaptación funcional (sin QA in-game en Android/PC)
 
 | Función | MCRust |
 |---|---|
@@ -21,9 +21,9 @@ el VSClient Fabric y sus servicios de servidor originales.
 | Filtros GPU y multicámara | Pendientes; se mantienen deshabilitados |
 | Controles del Bridge | State/profile; press/release; antirreplay; suprime mouse y movimiento tomados por acciones |
 | Brazos, armas y feedback | Recoil/action_effect y recarga de brazos local; BBModel, animación de actores y destellos por entidad pendientes |
-| HUD y overlays | Fades, bandas, efectos V3 básicos y subtítulos de texto; interfaz nativa de controles con F8 y guardado local |
+| HUD y overlays | Fades y bandas, GUI V3 con subtítulos multilínea y opacidad; acceso VS en pantalla, F8 y perfil persistente |
 | VIS Ceibo, skins y cuentas | Pendiente de Nexo/servicios |
-| Android ARM64 | Aún no compilado ni probado |
+| Android ARM64 | Layout de acciones táctiles con retención y liberación compartida con el teclado; sin build/QA en un dispositivo real |
 
 El adaptador anuncia CAMERA_V1, CONTROLS_V1, CONTROLS_UI_V1 y VIEW_V1. La pantalla nativa de controles se abre con F8 o por mensaje del Bridge, permite reasignar teclas, eliminar una asignación con Supr y restaurar los controles. Los cambios se guardan por instancia/perfil. Todavía no hay botones táctiles propios de VSClient. No anuncia VEHICLE_INPUT_V1,
 CINEMATIC_V3 ni otras funcionalidades pendientes. La cámara y el FOV no
@@ -115,6 +115,17 @@ Los efectos de software actuales son `cinema:fade_black`, `cinema:black`, `cinem
 
 ## Compatibilidad real con cinemáticas
 
-Se interpreta el JSON V3 con presupuesto de 5 vistas, 16 actores, 16 subtítulos y 8 efectos, verificando keyframes, revisiones, tiempos y geometría. **Por ahora solo se puede renderizar la cámara principal del mundo**, efectos GUI básicos y una línea de texto de cada subtítulo; falta capturar y componer las otras cuatro vistas y aplicar los rig/skins animados de actores. El renderer nativo de Horizon no proporciona ese compositor directamente por el protocolo del Bridge, por lo que **NO se anuncian CINEMATIC_V3 ni CINEMATIC_TRANSITIONS_V1**. Los mensajes V3 pueden recibirse de manera experimental, pero esto no garantiza que escenas antiguas reproduzcan igual que en Fabric.
+Se interpreta el JSON V3 con presupuesto de 5 vistas, 16 actores, 16 subtítulos y 8 efectos, verificando keyframes, revisiones, tiempos y geometría. **Por ahora solo se puede renderizar la cámara principal del mundo**, efectos GUI básicos y subtítulos multilínea con opacidad; falta capturar y componer las otras cuatro vistas y aplicar los rig/skins animados de actores. El renderer nativo de Horizon no proporciona ese compositor directamente por el protocolo del Bridge, por lo que **NO se anuncian CINEMATIC_V3 ni CINEMATIC_TRANSITIONS_V1**. Los mensajes V3 pueden recibirse de manera experimental, pero esto no garantiza que escenas antiguas reproduzcan igual que en Fabric.
 
 La recarga de brazos `vsrender:reload_arms` y los impulsos `vsrender:action_effect` son estrictamente visuales. El estado de slots, la mano activa y las animaciones de entidad todavía requieren integración con el renderer y no deberían considerarse equivalentes a la versión Java. Los tests de cargo/check no prueban la composición de GPU ni la compatibilidad Android ARM64.
+
+## Versión 0.4 — acciones Android y diagnóstico
+
+- En Android el mod muestra automáticamente, si hay un perfil válido del Bridge, una banda de hasta **cuatro botones de acciones**. Pulsar y soltar envía los mismos `virgoland:input` con secuencia que el teclado, respetando la simultaneidad de ambos orígenes. El botón **Más controles** cambia de página. Los clics no interceptan el resto de la pantalla.
+- En PC la banda comienza desactivada y se puede alternar mediante **F9**; la preferencia se guarda en el directorio del mod dentro de la instancia.
+- El botón **VS** permite abrir la ventana de controles desde la HUD sin usar un teclado físico, si el toque del sistema operativo llega como evento de puntero de Horizon.
+- Dentro de la ventana ahora se pueden **reasignar botones del ratón** además de teclas. Los perfiles se guardan por instancia y no necesitan reconstruir un JAR Fabric.
+- **F7**: ver enlace con el Bridge, estados, paquetes aceptados/rechazados, envíos y errores. No equivale a verificar la autenticación de Microsoft ni el servidor. Cuando el panel está visible, **F6** guarda `last_diagnostic` en el directorio de preferencias de VSClient; no conserva IP, chat, paquetes, sesiones ni tickets.
+- **F7**, durante una cinemática V3, muestra cajas 3D transitorias para revisar posiciones, escalas y nombres de los actores sin entidades reales: **son únicamente marcadores de depuración, no BBModel ni personajes renderizados**.
+
+**Límite de entrada:** los controles virtuales son de **un puntero**. El sistema Android/Horizon debe emitir los eventos de puntero; no se implementa aquí la pila multitáctil del sistema operativo ni el joystick analógico del cliente. El compositor V3 de vistas múltiples, actores con skins, animaciones BBModel y GPU shaders siguen pendientes; no se anuncian al Bridge. Nunca se modifica la autoridad del servidor. Las verificaciones actuales prueban el protocolo, los hooks y los layouts, no la conexión real a Virgoland.
