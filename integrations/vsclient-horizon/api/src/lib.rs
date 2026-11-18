@@ -18,7 +18,7 @@ use horizon_client::mod_api::{
     ScreenMouseButtonPressedPreEvent, MouseButtonPreEvent, MovementInputEvent,
     CameraShakeEvent, RenderHandPoseEvent, Hand, GuiDraw, Text, WorldPrimitivesEvent,
 };
-use std::{sync::Mutex, time::Instant};
+use std::{sync::{Mutex,atomic::{AtomicBool,Ordering}}, time::Instant};
 
 pub fn hooks() -> Box<dyn Hooks> {
     Box::new(VsClientHorizon {
@@ -32,6 +32,7 @@ pub fn hooks() -> Box<dyn Hooks> {
         }),
         zoom: Mutex::new(1.0),
         diagnostics: Mutex::new(Diagnostics::default()),
+        ticket_used: AtomicBool::new(false),
     })
 }
 struct VsClientHorizon {
@@ -41,6 +42,7 @@ struct VsClientHorizon {
     controls: Mutex<ControlsSession>,
     zoom: Mutex<f32>,
     diagnostics: Mutex<Diagnostics>,
+    ticket_used: AtomicBool,
 }
 fn send_actions(host: &mut dyn Host, actions: Vec<InputAction>, diagnostics: &Mutex<Diagnostics>) {
     for action in actions {
@@ -166,10 +168,14 @@ impl Hooks for VsClientHorizon {
         // No fake auth, no logging secrets, no disk persistence.
         if let Ok(ticket) = std::env::var("VIS_NEXO_CLIENT_BRIDGE_TICKET") {
             if let Ok(data) = core::auth_ticket(&ticket) {
-                let sent=host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
-                    channel: core::CHANNEL_AUTH.into(), data,
-                })).is_ok();
-                if let Ok(mut diag)=self.diagnostics.lock(){diag.sent(sent);}
+                // One-use credential: never resend the same environment token
+                // when a player changes servers or re-logs during this process.
+                if !self.ticket_used.swap(true,Ordering::AcqRel) {
+                    let sent=host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
+                        channel: core::CHANNEL_AUTH.into(), data,
+                    })).is_ok();
+                    if let Ok(mut diag)=self.diagnostics.lock(){diag.sent(sent);}
+                }
             }
         }
         let ok=host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
