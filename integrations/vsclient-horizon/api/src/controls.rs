@@ -1,7 +1,7 @@
 //! Server-authoritative VSClient control profiles for Horizon/MCRust.
 //! Implements the Java Bridge protocol 8 state/profile/input contract.
 //! Pure Rust, no Fabric/GLFW, so protocol tests run without the game.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub const CHANNEL_STATE: &str = "virgoland:state";
 pub const CHANNEL_PROFILE: &str = "virgoland:profile";
@@ -13,7 +13,7 @@ const MAX_ACTIONS: usize = 32;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Binding { Key(i32), Mouse(u8), None }
 impl Binding {
-    fn parse(wire: &str) -> Result<Self, &'static str> {
+    pub fn parse(wire: &str) -> Result<Self, &'static str> {
         let (device, code) = wire.split_once(':').ok_or("Missing binding separator")?;
         let code = code.parse::<i32>().map_err(|_| "Invalid binding code")?;
         match (device, code) {
@@ -22,6 +22,37 @@ impl Binding {
             ("n", -1) => Ok(Self::None),
             _ => Err("Unsupported control binding"),
         }
+    }
+    pub fn to_wire(&self) -> String {
+        match self { Self::Key(k) => format!("k:{k}"), Self::Mouse(m) => format!("m:{m}"), Self::None => "n:-1".into() }
+    }
+    /// The legacy Bridge key codes correspond to GLFW integer codes; Horizon
+    /// exposes neutral Minecraft key names, so convert only at this boundary.
+    pub fn from_key(key: &str) -> Option<Self> {
+        let mouse = match key {
+            "key.mouse.left" | "key.mouse.0" | "key.mouse.1" => Some(0),
+            "key.mouse.right" | "key.mouse.2" => Some(1),
+            "key.mouse.middle" | "key.mouse.3" => Some(2),
+            _ => None,
+        };
+        if let Some(m) = mouse { return Some(Self::Mouse(m)); }
+        let k=key.strip_prefix("key.keyboard.")?;
+        if k.len()==1 {
+            let b=k.as_bytes()[0];
+            if b.is_ascii_lowercase() {return Some(Self::Key((b-32) as i32));}
+            if b.is_ascii_digit() {return Some(Self::Key(b as i32));}
+        }
+        if let Some(i)=k.strip_prefix('f').and_then(|x|x.parse::<i32>().ok()) {
+            if (1..=12).contains(&i) {return Some(Self::Key(289+i));}
+        }
+        let n=match k {
+            "space"=>32, "escape"=>256, "enter" | "return"=>257, "tab"=>258,
+            "backspace"=>259, "insert"=>260, "delete"=>261, "right"=>262, "left"=>263,
+            "down"=>264, "up"=>265, "left.shift"=>340, "left.control"=>341,
+            "left.alt"=>342, "right.shift"=>344, "right.control"=>345, "right.alt"=>346,
+            _=>return None,
+        };
+        Some(Self::Key(n))
     }
     /// Horizon supplies the normal Minecraft key strings for both native
     /// keyboard and mouse input, including gamepad's mapped key events.
@@ -66,14 +97,40 @@ pub struct Action {
     pub id: String,
     pub binding: Binding,
     pub phases: u8,
+    pub display_name: String,
 }
 #[derive(Clone, Debug)]
 pub struct Profile {
     pub revision: u64,
     pub id: String,
     pub state: String,
+    pub display_name: String,
     pub actions: Vec<Action>,
 }
+/// Bounded base64url decoder for the Bridge's untrusted display labels.
+fn decode_label(raw: &str) -> Result<String, &'static str> {
+    if raw.len() > 256 || raw.bytes().any(|b| !b.is_ascii_alphanumeric() && !matches!(b,b'-'|b'_'|b'=')) {
+        return Err("Invalid encoded label");
+    }
+    let mut out=Vec::new();
+    let mut bits=0_u32;
+    let mut count=0_u8;
+    let mut padding=false;
+    for c in raw.bytes() {
+        if c==b'=' {padding=true;continue;}
+        if padding {return Err("Invalid label padding");}
+        let v=match c {b'A'..=b'Z'=>c-b'A',b'a'..=b'z'=>c-b'a'+26,
+            b'0'..=b'9'=>c-b'0'+52,b'-'=>62,b'_'=>63,_=>return Err("Invalid encoded label")};
+        bits=(bits<<6)|u32::from(v);
+        count+=6;
+        if count>=8 {count-=8;out.push((bits>>count) as u8);bits&=(1_u32<<count)-1;}
+    }
+    if count==6 || (count>0 && bits!=0) {return Err("Bad label bit padding");}
+    let text=String::from_utf8(out).map_err(|_|"Invalid label UTF-8")?;
+    if text.chars().any(|c|c.is_control()) || text.chars().count()>100 {return Err("Unsafe label");}
+    Ok(text)
+}
+
 fn valid_state(s: &str) -> bool {
     matches!(s, "OVERWORLD" | "MINIGAME" | "CINEMATIC" | "DRIVING" | "FOOTBALL")
 }
@@ -103,7 +160,7 @@ pub fn parse_profile(wire: &str) -> Result<Profile, &'static str> {
     if p.len() < 3 || p[0] != "8" { return Err("Bad profile header"); }
     let revision = p[1].parse::<u64>().map_err(|_| "Bad profile revision")?;
     if p[2] == "-" && p.len() == 3 {
-        return Ok(Profile { revision, id: "-".into(), state: "OVERWORLD".into(), actions: vec![] });
+        return Ok(Profile { revision, id: "-".into(), state: "OVERWORLD".into(), display_name: "Sin perfil".into(), actions: vec![] });
     }
     if p.len() != 7 || !valid_id(p[2]) || !valid_state(p[3]) {
         return Err("Bad profile identity");
@@ -112,7 +169,7 @@ pub fn parse_profile(wire: &str) -> Result<Profile, &'static str> {
     // them in this headless version; still reject malformed/unbounded wire.
     let valid_b64 = |s: &str| s.len() <= 256
         && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'=');
-    if !valid_b64(p[4]) { return Err("Bad profile display name"); }
+    let display_name=decode_label(p[4])?;
     let count = p[5].parse::<usize>().map_err(|_| "Bad action count")?;
     if count > MAX_ACTIONS { return Err("Too many actions"); }
     let rows: Vec<&str> = if p[6].is_empty() { vec![] } else { p[6].split(';').collect() };
@@ -126,9 +183,9 @@ pub fn parse_profile(wire: &str) -> Result<Profile, &'static str> {
         }
         let phases = col[3].parse::<u8>().map_err(|_| "Bad phases")?;
         if !(1..=3).contains(&phases) { return Err("Unsupported input phases"); }
-        actions.push(Action {id: col[0].into(), binding: Binding::parse(col[2])?, phases});
+        actions.push(Action {id: col[0].into(), binding: Binding::parse(col[2])?, phases, display_name: decode_label(col[1])?});
     }
-    Ok(Profile {revision, id:p[2].into(), state:p[3].into(), actions})
+    Ok(Profile {revision, id:p[2].into(), state:p[3].into(), display_name, actions})
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -138,13 +195,16 @@ pub struct ControlsSession {
     state: String,
     state_revision: Option<u64>,
     profile: Option<Profile>,
+    overrides: HashMap<(String,String),Binding>,
+    ui_page: usize,
+    capture: Option<String>,
     down: HashSet<String>,
     sequence: u64,
     tick: u64,
     ready: bool,
 }
 impl ControlsSession {
-    pub fn reset(&mut self) { *self = Self::default(); }
+    pub fn reset(&mut self) { self.state.clear(); self.state_revision=None; self.profile=None; self.down.clear(); self.sequence=0; self.tick=0; self.ready=false; self.ui_page=0; self.capture=None; }
     fn transition_release(&mut self) -> Vec<InputAction> {
         let Some(profile) = self.profile.as_ref() else { self.down.clear(); return vec![] };
         let releases: Vec<String> = profile.actions.iter()
@@ -173,6 +233,8 @@ impl ControlsSession {
         }
         let releases = self.transition_release();
         self.profile = Some(next);
+        self.ui_page=0;
+        self.capture=None;
         Ok(releases)
     }
     pub fn handle_key(&mut self, key: &str, pressed: bool, playing: bool) -> Vec<InputAction> {
@@ -180,7 +242,7 @@ impl ControlsSession {
         let Some(profile) = self.profile.as_ref() else {return vec![]};
         if !self.ready || self.state != profile.state {return vec![];}
         let delta:Vec<(String, u8)> = profile.actions.iter()
-            .filter(|a| a.binding.matches(key) && self.down.contains(&a.id) != pressed)
+            .filter(|a| self.effective_binding(&profile.id,a).matches(key) && self.down.contains(&a.id) != pressed)
             .map(|a| (a.id.clone(), a.phases)).collect();
         let mut result=Vec::new();
         for (id, phases) in delta {
@@ -207,6 +269,68 @@ impl ControlsSession {
             .map(|a| a.id.clone()).collect();
         ids.into_iter().map(|id| self.out(id,true)).collect()
     }
+    pub fn effective_binding(&self, profile_id: &str, action: &Action) -> Binding {
+        self.overrides.get(&(profile_id.to_owned(),action.id.clone()))
+            .cloned().unwrap_or_else(||action.binding.clone())
+    }
+    pub fn current_profile(&self) -> Option<&Profile> {self.profile.as_ref()}
+    pub fn ui_page(&self) -> usize {self.ui_page}
+    pub fn capture_id(&self) -> Option<&str> {self.capture.as_deref()}
+    pub fn page_step(&mut self, amount: i32) {
+        let count=self.profile.as_ref().map_or(0,|p|p.actions.len());
+        let last=count.saturating_sub(1)/8;
+        if amount<0 {self.ui_page=self.ui_page.saturating_sub(1);}
+        else {self.ui_page=(self.ui_page+1).min(last);}
+    }
+    pub fn begin_capture(&mut self, id: &str) -> bool {
+        let Some(p)=self.profile.as_ref() else{return false};
+        if !p.actions.iter().any(|a|a.id==id){return false;}
+        self.capture=Some(id.into());true
+    }
+    pub fn cancel_capture(&mut self){self.capture=None;}
+    pub fn apply_capture(&mut self, key: &str) -> Result<bool,&'static str> {
+        let Some(id)=self.capture.take() else{return Ok(false)};
+        if key=="key.keyboard.escape" {return Ok(false);}
+        let binding=if matches!(key, "key.keyboard.delete"|"key.keyboard.backspace") {
+            Binding::None
+        } else {Binding::from_key(key).ok_or("Unsupported key binding")?};
+        let Some(p)=self.profile.as_ref() else {return Ok(false)};
+        let profile_id=p.id.clone();
+        if !p.actions.iter().any(|a|a.id==id) {return Ok(false);}
+        self.down.clear();
+        // Eliminate duplicate assignments within this profile: the edited
+        // action takes precedence, leaving the previous binding unbound.
+        if binding!=Binding::None {
+            let conflicts:Vec<String>=p.actions.iter()
+                .filter(|a|a.id!=id && self.effective_binding(&profile_id,a)==binding)
+                .map(|a|a.id.clone()).collect();
+            for other in conflicts {self.overrides.insert((profile_id.clone(),other),Binding::None);}
+        }
+        self.overrides.insert((profile_id,id),binding);
+        Ok(true)
+    }
+    pub fn clear_profile_overrides(&mut self){
+        if let Some(p)=self.profile.as_ref(){self.overrides.retain(|(id,_),_|id!=&p.id);}
+        self.down.clear();self.capture=None;
+    }
+    pub fn bindings_wire(&self) -> String {
+        let mut rows:Vec<String>=self.overrides.iter().map(|((p,a),b)|format!("{p}|{a}|{}",b.to_wire())).collect();
+        rows.sort();
+        rows.join("\n")
+    }
+    pub fn load_bindings(&mut self,wire:&str)->Result<(),&'static str>{
+        if wire.len()>32768{return Err("Settings too large");}
+        let mut next=HashMap::new();
+        for row in wire.lines(){
+            if row.is_empty(){continue;}
+            let cols:Vec<&str>=row.split('|').collect();
+            if cols.len()!=3 || !valid_id(cols[0]) || !valid_id(cols[1]) || next.len()>=256{
+                return Err("Invalid saved settings");
+            }
+            next.insert((cols[0].into(),cols[1].into()),Binding::parse(cols[2])?);
+        }
+        self.overrides=next;self.down.clear();Ok(())
+    }
     pub fn profile_id(&self) -> Option<&str> { self.profile.as_ref().map(|p| p.id.as_str()) }
 }
 
@@ -227,6 +351,39 @@ mod tests {
         }
         assert_eq!(parse_view("8|3.25").unwrap(),3.25);
         for wire in ["8|0","8|NaN","8|11","9|2"] {assert!(parse_view(wire).is_err());}
+    }
+    #[test]
+    fn binds_persist_per_profile_and_reject_unsupported_inputs() {
+        let mut s=ControlsSession::default();
+        s.apply_state("8|1|DRIVING").unwrap();
+        s.apply_profile(profile()).unwrap();
+        assert!(s.begin_capture("tractor_prototipo:conduccion.forward"));
+        assert!(s.apply_capture("key.keyboard.t").unwrap());
+        assert_eq!(s.handle_key("key.keyboard.w",true,true).len(),0);
+        assert_eq!(s.handle_key("key.keyboard.t",true,true).len(),1);
+        let saved=s.bindings_wire();
+        let mut new=ControlsSession::default();
+        new.load_bindings(&saved).unwrap();
+        new.apply_state("8|1|DRIVING").unwrap();
+        new.apply_profile(profile()).unwrap();
+        assert_eq!(new.handle_key("key.keyboard.t",true,true).len(),1);
+        assert!(new.load_bindings("not-valid").is_err());
+        assert_eq!(Binding::from_key("key.keyboard.f12"),Some(Binding::Key(301)));
+        assert_eq!(Binding::from_key("key.keyboard.delete"),Some(Binding::Key(261)));
+        assert!(new.begin_capture("tractor_prototipo:conduccion.forward"));
+        assert!(new.apply_capture("key.keyboard.delete").unwrap());
+        assert_eq!(new.handle_key("key.keyboard.t",true,true).len(),0);
+        new.clear_profile_overrides();
+        assert_eq!(new.handle_key("key.keyboard.w",true,true).len(),1);
+    }
+    #[test]
+    fn preserves_bindings_across_session_resets_and_rejects_corrupt_labels(){
+        let mut s=ControlsSession::default();
+        s.load_bindings("virgoland:drive|virgoland:horn|k:70").unwrap();
+        s.reset();
+        assert!(s.bindings_wire().contains("virgoland:horn|k:70"));
+        assert!(parse_profile("8|2|virgoland:drive|DRIVING|$|0|").is_err());
+        assert_eq!(decode_label("Q2FtacOzbg").unwrap(),"Camión");
     }
     #[test]
     fn press_release_focus_loss_and_tracked_sequence() {
