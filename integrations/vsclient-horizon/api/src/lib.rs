@@ -247,7 +247,7 @@ impl Hooks for VsClientHorizon {
             if let Ok(mut f)=self.feedback.lock(){f.reset();}
         }
         let actions = self.controls.lock().ok().map(|mut c| c.heartbeat(playing));
-        if let Some(actions) = actions { send_actions(host, actions); }
+        if let Some(actions) = actions { send_actions(host, actions, &self.diagnostics); }
     }
 
     fn mouse_button_pre(&self, host: &mut dyn Host, event: &mut MouseButtonPreEvent) -> Flow {
@@ -264,7 +264,7 @@ impl Hooks for VsClientHorizon {
             (claimed,actions)
         }).unwrap_or((false,vec![]));
         if claimed {
-            send_actions(host,actions);
+            send_actions(host, actions, &self.diagnostics);
             Flow::Cancel
         } else {Flow::Continue}
     }
