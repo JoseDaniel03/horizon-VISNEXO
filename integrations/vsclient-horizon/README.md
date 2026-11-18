@@ -17,10 +17,10 @@ el VSClient Fabric y sus servicios de servidor originales.
 | FOV cinematográfico | Hook nativo |
 | Smoothstep, ángulo más corto, expiración, reinicio | Implementado |
 | cinematic_v3 | Parser validado; cámara principal, subtítulos y efectos GUI. Multivista/actores 3D pendientes, no se anuncia al Bridge |
-| Roll independiente del filtro de distorsión | Pendiente |
+| Roll de cámara | Aproximación visual limitada a 10°, usando cámara-shake nativo y respetando ajustes de distorsión |
 | Filtros GPU y multicámara | Pendientes; se mantienen deshabilitados |
 | Controles del Bridge | State/profile; press/release; antirreplay; suprime mouse y movimiento tomados por acciones |
-| Brazos, armas y feedback | Recoil/action_effect y recarga de brazos local; BBModel, animación de actores y destellos por entidad pendientes |
+| Brazos, armas y feedback | Action recoil, recarga visual local y destellos de `vsrender:weapon_feedback` sobre entidades conocidas; BBModel/animación de actores pendientes |
 | HUD y overlays | Fades y bandas, GUI V3 con subtítulos multilínea y opacidad; acceso VS en pantalla, F8 y perfil persistente |
 | VIS Ceibo, skins y cuentas | Pendiente de Nexo/servicios |
 | Android ARM64 | Layout de acciones táctiles con retención y liberación compartida con el teclado; sin build/QA en un dispositivo real |
@@ -69,7 +69,8 @@ Cuando el servidor usa launcher-auth.enabled=true, el Bridge de VSClient exige
 un ticket de una sola utilización expedido por la plataforma; mandar hello
 sin ticket NO autentica al jugador. El mod puede leer una variable privada del
 proceso del juego llamada VIS_NEXO_CLIENT_BRIDGE_TICKET y transmitirla por el
-canal virgoland:auth ANTES del hello, en protocolo 8.
+canal virgoland:auth ANTES del hello, en protocolo 8. El ticket se envía como máximo
+**una vez por proceso**, incluso si se cambia de servidor, y nunca se guarda en logs.
 
 **VIS Nexo todavía debe obtener ese ticket del servicio autorizado y pasarlo
 al proceso MCRust**; esta entrega no crea, renueva ni almacena credenciales.
@@ -129,3 +130,9 @@ La recarga de brazos `vsrender:reload_arms` y los impulsos `vsrender:action_effe
 - **F7**, durante una cinemática V3, muestra cajas 3D transitorias para revisar posiciones, escalas y nombres de los actores sin entidades reales: **son únicamente marcadores de depuración, no BBModel ni personajes renderizados**.
 
 **Límite de entrada:** los controles virtuales son de **un puntero**. El sistema Android/Horizon debe emitir los eventos de puntero; no se implementa aquí la pila multitáctil del sistema operativo ni el joystick analógico del cliente. El compositor V3 de vistas múltiples, actores con skins, animaciones BBModel y GPU shaders siguen pendientes; no se anuncian al Bridge. Nunca se modifica la autoridad del servidor. Las verificaciones actuales prueban el protocolo, los hooks y los layouts, no la conexión real a Virgoland.
+
+## Feedback visual remoto
+
+Se interpretan ahora los paquetes `vsrender:weapon_feedback` con los límites de Fabric (`actor`, recoil, recuperación, luz 0–15 y flash máximo de seis ticks). Durante el flash se dibuja una pequeña geometría traslúcida y temporal frente a la posición de la entidad recibida en Horizon. El efecto no modifica la iluminación física del mundo, la lógica de daño ni el inventario. Las animaciones esqueléticas de recarga de otras entidades y la generación del modelo BBModel requieren una capa 3D nativa adicional.
+
+**Limitaciones importantes:** la conexión real a Virgoland, los permisos y autenticación de Microsoft, GPU multivista, skins y renderizado de modelos, gamepad analógico, Android multitáctil y QA del Motorola no están validados. Los informes F6 no contienen tickets ni direcciones; el código actual tampoco verifica que un ticket de VIS Nexo esté vinculado al host: el proceso que lo inyecta debe garantizarlo.
