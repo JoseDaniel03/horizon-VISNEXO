@@ -8,8 +8,8 @@ const MAX_ROWS: usize=8;
 fn per_page(b:[f32;4])->usize {(((b[3]-88.0)/24.0).floor() as usize).clamp(1,MAX_ROWS)}
 fn layout(screen: &NativeScreenView<'_>) -> [f32;4] {
     let [x,y,w,h]=screen.rect;
-    let wide=(w-16.0).clamp(180.0,600.0);
-    [x+(w-wide)*0.5,y+12.0,wide,h-24.0]
+    let wide=(w-16.0).clamp(1.0,600.0);
+    [x+(w-wide)*0.5,y+12.0,wide,(h-24.0).max(1.0)]
 }
 fn within(mouse:[f32;2], rect:[f32;4])->bool{
     mouse[0]>=rect[0] && mouse[1]>=rect[1] &&
@@ -20,8 +20,17 @@ fn row(layout:[f32;4], index:usize)->[f32;4]{
 }
 pub enum Click {None,Handled,Save}
 pub fn click(screen:&NativeScreenView<'_>, controls:&mut ControlsSession, button:i32)->Click {
-    if button !=0 {return Click::None;}
     let b=layout(screen);
+    if controls.capture_id().is_some() {
+        let physical=match button {
+            0=>"key.mouse.left",1=>"key.mouse.right",2=>"key.mouse.middle",_=>return Click::Handled
+        };
+        return match controls.apply_capture(physical){
+            Ok(true)=>Click::Save,
+            _=>Click::Handled,
+        };
+    }
+    if button !=0 {return Click::None;}
     let mouse=screen.mouse;
     if !within(mouse,b){return Click::None;}
     if let Some(profile)=controls.current_profile(){
@@ -51,7 +60,7 @@ pub fn draw(host:&dyn Host,event:&mut ScreenRenderPostEvent<'_>,controls:&Contro
     host.fill(event.batch,b,0xe5101621);
     host.fill(event.batch,[b[0],b[1],b[2],3.0],0xff8b6dbb);
     host.text(event.batch,"VSClient | Controles",[b[0]+10.0,b[1]+9.0],0xffe9ddff,true);
-    host.text(event.batch,"Toca una accion para reasignar; Supr para quitar",[b[0]+10.0,b[1]+27.0],0xffbcc1d5,false);
+    host.text(event.batch,"Toca una accion, luego tecla o boton del raton",[b[0]+10.0,b[1]+27.0],0xffbcc1d5,false);
     if let Some(profile)=controls.current_profile(){
         let title=format!("{} / {}",profile.display_name,profile.state);
         host.text(event.batch,&title,[b[0]+10.0,b[1]+42.0],0xffc9b5e9,false);
@@ -87,3 +96,7 @@ pub fn draw(host:&dyn Host,event:&mut ScreenRenderPostEvent<'_>,controls:&Contro
     host.text(event.batch,">",[b[0]+b[2]*0.60,y+8.0],0xffffffff,false);
     host.text(event.batch,"Restaurar",[b[0]+b[2]*0.70,y+8.0],0xffffffff,false);
 }
+
+/// Compact touch/cursor shortcut; only shown during play, never atop menus.
+pub fn button_rect(width:f32)->[f32;4]{[(width-58.0).max(0.0),8.0,50.0,27.0]}
+pub fn in_button(cursor:[f32;2],width:f32)->bool{within(cursor,button_rect(width))}
