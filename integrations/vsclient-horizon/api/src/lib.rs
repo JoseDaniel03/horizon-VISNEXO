@@ -2,12 +2,15 @@
 //! Shares the Java VSClient Bridge protocol 8. Server remains authoritative.
 mod core;
 mod controls;
+mod ui;
 use core::{CameraSession, CHANNEL_CAMERA, MAX_CUE_BYTES, decode_string};
 use controls::{ControlsSession, InputAction, CHANNEL_INPUT, CHANNEL_PROFILE, CHANNEL_STATE, CHANNEL_VIEW};
 use horizon_client::mod_api::{
     CameraPoseEvent, ClientDisconnectingEvent, ClientPacketEvent, GuiRenderPostEvent,
     ClientPlayerNetworkLoggingInEvent, ClientTickPostEvent, ClientboundPlayPacket, ComputeFovEvent,
     CustomPayload, Hooks, Host, KeyEvent, NativeScreenKind, ServerboundPlayPacket,
+    ClientStartEvent, Flow, ScreenRenderPostEvent, ScreenKeyPressedPreEvent,
+    ScreenMouseButtonPressedPreEvent,
 };
 use std::{sync::Mutex, time::Instant};
 
@@ -40,6 +43,13 @@ fn in_world(host: &dyn Host) -> bool {
         && s.screen == NativeScreenKind::Playing && s.world.is_some())
 }
 impl Hooks for VsClientHorizon {
+    fn client_start(&self, host: &mut dyn Host, _event: &mut ClientStartEvent) {
+        if let Some(saved)=host.setting(ui::ID, "bindings") {
+            if let Ok(mut controls)=self.controls.lock() {
+                let _=controls.load_bindings(&saved);
+            }
+        }
+    }
     fn client_player_network_logging_in(
         &self,
         host: &mut dyn Host,
@@ -67,7 +77,7 @@ impl Hooks for VsClientHorizon {
         let ClientboundPlayPacket::CustomPayload(packet) = event.packet else { return };
         let channel = packet.channel.as_str();
         let max = if channel == CHANNEL_PROFILE { 32_768 } else { MAX_CUE_BYTES };
-        if !matches!(channel, CHANNEL_CAMERA | CHANNEL_STATE | CHANNEL_PROFILE | CHANNEL_VIEW) {
+        if !matches!(channel, CHANNEL_CAMERA | CHANNEL_STATE | CHANNEL_PROFILE | CHANNEL_VIEW | "virgoland:controls") {
             return;
         }
         let Ok(text) = decode_string(&packet.data, max) else { return };
@@ -87,6 +97,11 @@ impl Hooks for VsClientHorizon {
                     .and_then(|mut c| c.apply_profile(text).ok());
                 if let Some(actions) = actions { send_actions(host,actions); }
             }
+            "virgoland:controls" => {
+                if text=="8|open" {
+                    let _=host.mod_screen_open(ui::ID);
+                }
+            }
             CHANNEL_VIEW => {
                 if let Ok(zoom) = controls::parse_view(text) {
                     if let Ok(mut current) = self.zoom.lock() { *current = zoom; }
@@ -97,6 +112,10 @@ impl Hooks for VsClientHorizon {
     }
 
     fn key(&self, host: &mut dyn Host, event: &mut KeyEvent<'_>) {
+        if event.pressed && event.key=="key.keyboard.f8" && in_world(host) {
+            let _=host.mod_screen_open(ui::ID);
+            return;
+        }
         let playing = in_world(host);
         let actions = self.controls.lock().ok()
             .map(|mut c| c.handle_key(event.key, event.pressed, playing));
@@ -109,6 +128,43 @@ impl Hooks for VsClientHorizon {
         let playing = in_world(host);
         let actions = self.controls.lock().ok().map(|mut c| c.heartbeat(playing));
         if let Some(actions) = actions { send_actions(host, actions); }
+    }
+
+    fn screen_render_post(&self, host: &dyn Host, event: &mut ScreenRenderPostEvent<'_>) {
+        if event.screen.id != "mod" || host.mod_screen() != Some(ui::ID) {return;}
+        if let Ok(controls)=self.controls.lock() {
+            ui::draw(host, event, &controls);
+        }
+    }
+
+    fn screen_mouse_button_pressed_pre(&self, host: &dyn Host, event: &mut ScreenMouseButtonPressedPreEvent<'_>) -> Flow {
+        if event.screen.id!="mod" || host.mod_screen()!=Some(ui::ID) {return Flow::Continue;}
+        if let Ok(mut controls)=self.controls.lock() {
+            match ui::click(event.screen,&mut controls,event.button) {
+                ui::Click::None => Flow::Continue,
+                ui::Click::Handled => Flow::Cancel,
+                ui::Click::Save => {
+                    host.set_setting(ui::ID,"bindings",&controls.bindings_wire());
+                    Flow::Cancel
+                }
+            }
+        } else {Flow::Continue}
+    }
+
+    fn screen_key_pressed_pre(&self, host: &dyn Host, event: &mut ScreenKeyPressedPreEvent<'_>) -> Flow {
+        if event.screen.id!="mod" || host.mod_screen()!=Some(ui::ID) || event.repeat {
+            return Flow::Continue;
+        }
+        if let Ok(mut controls)=self.controls.lock() {
+            if controls.capture_id().is_some() {
+                let result=controls.apply_capture(event.key);
+                if result == Ok(true) {
+                    host.set_setting(ui::ID,"bindings",&controls.bindings_wire());
+                }
+                return Flow::Cancel;
+            }
+        }
+        Flow::Continue
     }
 
     fn camera_pose(&self, _host: &dyn Host, event: &mut CameraPoseEvent<'_>) {
