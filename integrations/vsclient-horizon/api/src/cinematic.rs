@@ -28,6 +28,19 @@ pub struct Effect {pub kind:String,pub amount:f32,pub color:u32,pub rect:Rect}
 #[derive(Clone,Debug)]
 pub struct Actor {pub id:String,pub profile:String,pub entity_id:Option<String>,
     pub entity_type:String,pub cue:CameraCue,pub scales:Vec<f32>}
+impl Actor {
+    /// Sample the same linear scale between ordered keys as Java.
+    /// Pose sampling uses the camera's shortest-angle interpolation.
+    pub fn sample(&self,seconds:f64)->(Pose,f32) {
+        let pose=self.cue.sample(seconds);
+        let hi=self.cue.keys.partition_point(|k|k.seconds<=seconds);
+        let before=hi.saturating_sub(1);
+        let Some(next)=self.cue.keys.get(hi) else {return (pose,self.scales[before]);};
+        let current=&self.cue.keys[before];
+        let factor=((seconds-current.seconds)/(next.seconds-current.seconds)).clamp(0.0,1.0) as f32;
+        (pose,self.scales[before]+(self.scales[hi]-self.scales[before])*factor)
+    }
+}
 #[derive(Clone,Debug)]
 pub struct Scene {pub revision:u64,pub id:String,pub stop:bool,pub views:Vec<View>,
     pub actors:Vec<Actor>,pub captions:Vec<Caption>,pub effects:Vec<Effect>}
@@ -243,6 +256,19 @@ mod tests{
         assert!((middle.yaw-360.0).abs()<0.01);
         assert_eq!(scene.duration(),1.0);
         assert!(parse(&data.replace(r#""sceneId":"test""#,r#""sceneId":"../bad""#)).is_err());
+    }
+    #[test]
+    fn actor_scale_matches_linear_java_sampling(){
+        let key=|seconds:f64| Key {seconds,pose:Pose{
+            pos:[0.0,64.0,0.0],yaw:0.0,pitch:0.0,roll:0.0,fov:70.0}};
+        let actor=Actor{id:"camera_actor".into(),profile:"Player".into(),
+            entity_id:None,entity_type:"minecraft:mannequin".into(),
+            cue:CameraCue{revision:0,keys:vec![key(0.0),key(1.0)],effects:vec![]},
+            scales:vec![1.0,2.0]};
+        assert_eq!(actor.sample(0.0).1,1.0);
+        assert_eq!(actor.sample(0.5).1,1.5);
+        assert_eq!(actor.sample(1.0).1,2.0);
+        assert_eq!(actor.sample(4.0).1,2.0);
     }
     #[test]
     fn stop_and_replay_rules(){
