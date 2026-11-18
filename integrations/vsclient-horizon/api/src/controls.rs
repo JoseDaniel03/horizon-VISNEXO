@@ -269,6 +269,19 @@ impl ControlsSession {
             .map(|a| a.id.clone()).collect();
         ids.into_iter().map(|id| self.out(id,true)).collect()
     }
+    /// Only an active server profile can claim physical mouse/movement inputs.
+    pub fn claimed_mouse(&self, button:i32)->bool {
+        let Some(p)=self.profile.as_ref() else {return false};
+        self.ready && self.state==p.state && p.actions.iter()
+            .any(|a|matches!(self.effective_binding(&p.id,a),Binding::Mouse(n) if i32::from(n)==button))
+    }
+    /// Don't let Vanilla movement leak through a server-owned vehicle binding.
+    /// Keyboard and gamepad movement still remain user controlled elsewhere.
+    pub fn claims_move(&self, keys:&[i32])->bool {
+        let Some(p)=self.profile.as_ref() else {return false};
+        self.ready && self.state==p.state && p.actions.iter()
+            .any(|a|matches!(self.effective_binding(&p.id,a),Binding::Key(k) if keys.contains(&k)))
+    }
     pub fn effective_binding(&self, profile_id: &str, action: &Action) -> Binding {
         self.overrides.get(&(profile_id.to_owned(),action.id.clone()))
             .cloned().unwrap_or_else(||action.binding.clone())
@@ -276,9 +289,9 @@ impl ControlsSession {
     pub fn current_profile(&self) -> Option<&Profile> {self.profile.as_ref()}
     pub fn ui_page(&self) -> usize {self.ui_page}
     pub fn capture_id(&self) -> Option<&str> {self.capture.as_deref()}
-    pub fn page_step(&mut self, amount: i32) {
+    pub fn page_step(&mut self, amount: i32, per_page: usize) {
         let count=self.profile.as_ref().map_or(0,|p|p.actions.len());
-        let last=count.saturating_sub(1)/8;
+        let last=count.saturating_sub(1)/per_page.max(1);
         if amount<0 {self.ui_page=self.ui_page.saturating_sub(1);}
         else {self.ui_page=(self.ui_page+1).min(last);}
     }
