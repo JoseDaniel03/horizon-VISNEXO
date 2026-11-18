@@ -255,6 +255,12 @@ impl Hooks for VsClientHorizon {
         // claims this button, send the semantic action BEFORE vanilla mining,
         // attacking or using an item can consume it.
         if !in_world(host) {return Flow::Continue;}
+        if event.button==0 && event.pressed
+            && host.client_state().is_some_and(|s|!s.gui_hidden)
+            && host.client_state().is_some_and(|s|ui::in_button(host.cursor(),s.gui_size[0]))
+        {
+            if host.mod_screen_open(ui::ID) {return Flow::Cancel;}
+        }
         let (claimed,actions)=self.controls.lock().map(|mut c|{
             let claimed=c.claimed_mouse(event.button);
             let key=match event.button {
@@ -388,6 +394,11 @@ impl Hooks for VsClientHorizon {
         if state.screen != NativeScreenKind::Playing || state.world.is_none() { return; }
         let (width,height) = (event.batch.width,event.batch.height);
         if width <= 0.0 || height <= 0.0 { return; }
+        if !state.gui_hidden {
+            let b=ui::button_rect(width);
+            host.fill(event.batch,b,0xdf302740);
+            host.text(event.batch,"VS",[b[0]+17.0,b[1]+9.0],0xffefe1ff,true);
+        }
         // Render the bounded V3 effects/captions even for clients whose
         // server sends scenes without relying on capability negotiation.
         if let Ok(mut cinema)=self.cinematic.lock(){
