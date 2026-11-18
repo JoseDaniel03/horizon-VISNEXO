@@ -118,7 +118,6 @@ impl Hooks for VsClientHorizon {
         if let Ok(mut c) = self.controls.lock() { c.reset(); }
         if let Ok(mut z) = self.zoom.lock() { *z = 1.0; }
         if let Ok(mut f) = self.feedback.lock() { f.reset(); }
-        if let Ok(mut f) = self.feedback.lock() { f.reset(); }
         // A one-use bridge ticket may be injected by the parent process.
         // No fake auth, no logging secrets, no disk persistence.
         if let Ok(ticket) = std::env::var("VIS_NEXO_CLIENT_BRIDGE_TICKET") {
@@ -376,6 +375,7 @@ impl Hooks for VsClientHorizon {
         if let Ok(mut c) = self.camera.lock() { c.reset(); }
         if let Ok(mut c) = self.cinematic.lock() { c.reset(); }
         if let Ok(mut c) = self.controls.lock() { c.reset(); }
+        if let Ok(mut f) = self.feedback.lock() { f.reset(); }
         if let Ok(mut z) = self.zoom.lock() { *z = 1.0; }
     }
 }
