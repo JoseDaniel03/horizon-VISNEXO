@@ -42,3 +42,8 @@ pub const STUN_SERVERS: &[&str] = &["stun.cloudflare.com:3478", "stun.l.google.c
 /// Play with Friends' troubleshooting page, shown to hosts nobody can reach.
 pub const FRIENDS_HELP: &str =
     "https://github.com/horizon-rust/horizon/blob/main/docs/play-with-friends.md#troubleshooting";
+
+/// Mojang's public Bedrock sample controls. Android fetches these pinned,
+/// hashed reference assets when building its optional touch-control pack.
+pub const BEDROCK_SAMPLES_RAW: &str =
+    "https://raw.githubusercontent.com/Mojang/bedrock-samples";
