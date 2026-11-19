@@ -1437,6 +1437,7 @@ dependencies = [
  "android_logger",
  "horizon-client",
  "horizon-core",
+ "horizon-mods",
  "horizon-official",
  "jni 0.21.1",
  "log",
