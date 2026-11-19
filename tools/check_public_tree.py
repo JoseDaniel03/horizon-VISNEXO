@@ -58,7 +58,11 @@ def paths_in_repository(history=False, revisions=None):
     # An empty push (including deletions only) must not fall back to HEAD or --all.
     if revisions is not None and not revisions:
         return []
-    roots = ["--all"] if revisions is None else revisions
+    # This check is run for main's own history. Scanning --all also follows
+    # unrelated remote feature branches fetched by actions/checkout(fetch-depth=0)
+    # and incorrectly blocks main for files which it has never contained.
+    # PRs and pre-push hooks still check every added commit via their range.
+    roots = ["HEAD"] if revisions is None else revisions
     # Include diffs against merge parents so merge-resolution-only artifacts are caught.
     # Git pushes the stored objects, not the history presented by local replace refs.
     result = subprocess.check_output(["git", "--no-replace-objects", "log", "--format=", "--name-only",
