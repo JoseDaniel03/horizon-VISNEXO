@@ -49,6 +49,7 @@
     "horizon-theme": "platform",
 
     "horizon-addresses": "horizon",
+    "horizon-android": "horizon",
     "horizon-bench": "horizon",
     "horizon-cosmetics": "horizon",
     "horizon-discord": "horizon",
