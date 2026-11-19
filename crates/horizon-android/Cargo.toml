@@ -7,6 +7,7 @@ rust-version.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 [dependencies]
+horizon-addresses = { path = "../horizon-addresses" }
 # The Android host is Horizon's product layer; it uses the platform facade,
 # not direct engine crates, for native game startup and resource versions.
 horizon-game = { path = "../horizon-game", default-features = false, features = ["android"] }
