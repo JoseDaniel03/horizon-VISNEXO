@@ -182,28 +182,30 @@ jobs:
           VSCLIENT MCRUST 0.4.1 - MOD NATIVO HORIZON
           ============================================
           Archivo: VSClient-MCRust-0.4.1.hnmod
-          No es un .jar de Fabric ni una APK. Horizon compila este mod nativo
-          con el cliente de Minecraft Rust en la instancia elegida.
-          Para instalarlo, extraé primero este .hnmod del ZIP descargado
-          de GitHub Actions. En el launcher del fork VIS, podés usar:
-            horizon-launcher native-build VSClient-MCRust-0.4.1.hnmod --instance INSTANCIA --allow-version-mismatch --trust-native-code
-          O copiá el .hnmod renombrado a vsclient.hnmod dentro de
-            INSTANCIA/horizon-native-mods/
-          y activá el mod en la lista de la instancia antes de compilarlo.
-          OPCIÓN SIN EDITAR CARPETAS A MANO EN PC (Python 3):
-            python3 INSTALAR_VSCLIENT.py --instance CARPETA_INSTANCIA --hnmod VSClient-MCRust-0.4.1.hnmod --replace
-          El instalador activa mod.vsclient:true pero NO ejecuta ni compila
-          código nativo. La aprobación se hace en la pantalla Native build.
-          Requiere un launcher del fork actualizado con reconocimiento directo
-          de .hnmod y resolución de commits de JoseDaniel03/horizon-VISNEXO.
-          El launcher oficial anterior no reconocerá el fork ni la APK Android
-          aceptará por sí sola un mod nativo sin compilar. Si la versión difiere,
-          no instales encima de tus mundos: usá una instancia separada.
-          Funciones: cámaras V1, FOV/zoom, controles de servidor, interfaz y
-          acciones táctiles, V3 experimental, efectos VSRender y diagnóstico.
-          No verificado dentro del juego ni en Android ARM64. El compositor
-          multicámara y los actores BBModel completos siguen pendientes.
-          Revisá el código: es nativo y requiere tu aprobación expresa.
+
+          INSTALACIÓN AUTOMÁTICA EN VIS NEXO (PC):
+          1. Extraé el .hnmod del ZIP externo descargado de GitHub Actions.
+          2. Copiá el .hnmod a la raíz de tu instancia McRust o a mods/.
+          3. Pulsá Jugar. VIS Nexo actualizado lo valida y activa solo.
+          4. El motor VIS actualizado ya tiene VSClient compilado en Rust;
+             no hace falta Python, un compilador o Native build manual.
+
+          Necesitás VIS Nexo y el motor McRust con VSClient 0.4.1
+          integrado. Una versión anterior te avisará que hay que
+          actualizar el motor, en vez de ignorar silenciosamente el mod.
+
+          PARA DESARROLLADORES DEL HORIZON LAUNCHER INDEPENDIENTE:
+          horizon-launcher native-build VSClient-MCRust-0.4.1.hnmod --instance INSTANCIA --allow-version-mismatch --trust-native-code
+          Esa ruta compila el mod nativo y requiere autorización.
+
+          ANDROID: requiere una APK recompilada con VSClient; el launcher
+          Android debe activar VSClient por instancia en su handoff.
+          Copiar .hnmod a la carpeta privada de otra app no funciona.
+          No se ha probado en un teléfono real.
+          No es un JAR Fabric ni una APK.
+          Solo se habilita código VSClient compilado y revisado en VIS.
+          Funciones V1, V3 parcial, controles, UI, VSRender y diagnóstico.
+          GPU multicámara, BBModel y efectos completos siguen pendientes.
           EOF
       - name: Validate with Horizon's real .hnmod bundle reader
         env:
