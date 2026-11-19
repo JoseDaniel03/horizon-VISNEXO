@@ -90,7 +90,10 @@ impl Loading {
         if self.android_suspended {
             self.android_suspended = false;
             if let Some(renderer) = &mut self.renderer {
-                if let Err(error) = renderer.recreate_surface() { self.error = Some(error); event_loop.exit(); }
+                if let Err(error) = renderer.recreate_surface() {
+                    self.error = Some(error);
+                    event_loop.exit();
+                }
             }
             return;
         }
@@ -107,7 +110,9 @@ impl Loading {
             .map(f64::from);
         self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
         let attributes =
-            horizon_client::window::with_icon(Window::default_attributes().with_title("Horizon"));
+            horizon_client::window::with_icon(
+                Window::default_attributes().with_title(horizon_core::CLIENT_NAME),
+            );
         // Wayland names the window by its app id, which the horizon.desktop entry matches.
         #[cfg(target_os = "linux")]
         let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
@@ -416,7 +421,9 @@ impl ApplicationHandler for App {
             App::Ready(game) => game.suspended(event_loop),
             App::Loading(loading) => {
                 loading.android_suspended = true;
-                if let Some(renderer) = &mut loading.renderer { renderer.suspend_surface(); }
+                if let Some(renderer) = &mut loading.renderer {
+                    renderer.suspend_surface();
+                }
             }
         }
     }
@@ -428,7 +435,9 @@ impl ApplicationHandler for App {
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         #[cfg(target_os = "android")]
-        if matches!(self, App::Loading(loading) if loading.android_suspended) { return; }
+        if matches!(self, App::Loading(loading) if loading.android_suspended) {
+            return;
+        }
         match self {
             App::Loading(loading) => loading.window_event(event_loop, id, event),
             App::Ready(game) => game.window_event(event_loop, id, event),
@@ -441,7 +450,9 @@ impl ApplicationHandler for App {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(target_os = "android")]
-        if matches!(self, App::Loading(loading) if loading.android_suspended) { return; }
+        if matches!(self, App::Loading(loading) if loading.android_suspended) {
+            return;
+        }
         enum Step {
             Waiting,
             Ready(Box<split::Split<'static>>),
@@ -501,6 +512,10 @@ pub(super) fn missing_resources(
     root: &std::path::Path,
     get: Option<horizon_hooks::GetTheGame>,
 ) -> Option<String> {
+    #[cfg(target_os = "android")]
+    if crate::android::has_resource_installer() {
+        return None;
+    }
     let shown = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
     if !root.join("horizon-resources.json").is_file() {
         let launcher = get.map_or(String::new(), |get| {

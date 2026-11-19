@@ -272,3 +272,28 @@ mod tests {
         assert_eq!(pick_adapter(&llvmpipe, true), Some(1));
     }
 }
+
+impl Renderer {
+    /// Release reusable staging allocations between frames. Submitted commands retain
+    /// their buffers; do not discard the belt of an unsubmitted section copy.
+    pub fn trim_staging_memory(&mut self) {
+        self.uploads = super::upload::Uploads::new(&self.device);
+        if self.section_copies.is_none() {
+            self.section_uploads = super::upload::Uploads::new(&self.device);
+        }
+    }
+}
+
+impl Renderer {
+    /// Android invalidates the native surface before returning from suspension.
+    #[cfg(target_os = "android")]
+    pub fn suspend_surface(&mut self) {
+        self.frame_gen.stop();
+        self.queue.wait();
+        self.surface = None;
+        self.spare_surface
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    }
+}

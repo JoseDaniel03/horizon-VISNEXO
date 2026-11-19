@@ -72,6 +72,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
+      VIS_DISCORD_APPLICATION_ID: ${{ vars.VIS_DISCORD_APPLICATION_ID }}
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_RELEASE_DEBUG: '0'
@@ -133,7 +134,7 @@ jobs:
 
   android:
     name: Android from the same engine commit
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/vis-portals-worlds'
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
@@ -161,6 +162,8 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358'
       - name: Prepare engine tables with this fork's exporter
         run: python3 tools/android_prepare.py --java-home "$JAVA_HOME_25_X64"
+      - name: Test sandboxed Android world management
+        run: python3 -m unittest discover -s tools -p test_android_world_store.py
       - name: Build and audit signed native APK
         env:
           VIS_ANDROID_KEYSTORE_B64: ${{ secrets.VIS_MCRUST_ANDROID_KEYSTORE_B64 }}
@@ -205,10 +208,11 @@ jobs:
 
   android-preview:
     name: Android ARM64 test APK — disposable signing (NOT stable)
-    if: github.ref == 'refs/heads/codex/vis-portals-worlds'
+    if: github.ref == 'refs/heads/codex/vis-portals-worlds' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
+      VIS_DISCORD_APPLICATION_ID: ${{ vars.VIS_DISCORD_APPLICATION_ID }}
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
       VIS_ANDROID_STORE_PASSWORD: android
@@ -264,7 +268,7 @@ jobs:
   release:
     name: Publish portable game for VIS Nexo
     needs: [game, android]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/vis-portals-worlds'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -298,6 +302,11 @@ jobs:
             echo "Release $TAG already exists and will not be overwritten"
             exit 0
           fi
+          release_flags=(--latest)
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            release_flags=(--prerelease)
+            printf '\nSigned testing channel: use the VIS Nexo preview launcher. Not a stable release.\n' >> out/RELEASE-NOTES.txt
+          fi
           gh release create "$TAG" \
             out/vis-horizon-linux-x86_64.tar.gz \
             out/vis-horizon-windows-x64.zip \
@@ -308,4 +317,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "VIS Horizon 26.3 · ${GITHUB_SHA:0:12}" \
             --notes-file out/RELEASE-NOTES.txt \
-            --latest
+            "${release_flags[@]}"

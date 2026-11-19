@@ -51,6 +51,7 @@ pub(super) struct StartupMenu {
     focus_screen: u64,
     pub pending: Option<PendingWorldEntry>,
     pub reload_packs: bool,
+    vis_friends_requested: bool,
     /// Browse mods' worker (`mod_browser`).
     mod_jobs: super::mod_browser::Jobs,
     pub perf: horizon_client::telemetry::Session,
@@ -139,6 +140,10 @@ impl StartupMenu {
             game.screen = Screen::Options;
             game.options_from_title = true;
             game.dragging = self.dragging;
+        }
+        #[cfg(feature="friends")]
+        if self.vis_friends_requested && std::env::var_os("VIS_PORTALS_ENDPOINT").is_some() {
+            game.screen=Screen::Friends;
         }
         if let Some(focus) = self.key_focus.take() {
             game.key_focus_adopt(focus, self.key_slider_edit);
@@ -781,6 +786,7 @@ impl Loading {
     fn menu_action(&mut self, event_loop: &dyn EventLoopCtl, action: Action) {
         match action {
             Action::Quit => event_loop.exit(),
+            Action::VisFriends => self.menu.vis_friends_requested = true,
             Action::Options => self.open_menu_options(Page::Main),
             Action::Accessibility => self.open_menu_options(Page::Accessibility),
             Action::Language => self.open_menu_options(Page::Language),
@@ -1017,6 +1023,10 @@ impl Loading {
             if touch.phase!=TouchPhase::Moved {
                 self.menu_event(event_loop,WindowEvent::MouseInput{device_id:touch.device_id,state:if touch.phase==TouchPhase::Started{ElementState::Pressed}else{ElementState::Released},button:MouseButton::Left})?;
             }
+            if touch.phase==TouchPhase::Started || touch.phase==TouchPhase::Ended {
+                let typing=if self.menu.options_open {self.menu.options.typing()}else{self.menu.title.as_mut().is_some_and(|title|title.has_caret_field()||title.focused_field().is_some())};
+                if let Some(window)=&self.window {window.set_ime_allowed(typing);}
+            }
             return Ok(());
         }
         if let WindowEvent::KeyboardInput { event, .. } = &event
@@ -1055,6 +1065,10 @@ impl Loading {
             return Ok(());
         }
         match event {
+            #[cfg(target_os="android")]
+            WindowEvent::Ime(winit::event::Ime::Commit(text)) if !self.menu.options_open && self.menu.pending.is_none() => {
+                if let Some(title)=&mut self.menu.title {title.type_text(&text);}
+            }
             WindowEvent::CloseRequested => {
                 if !self.settings.quit_shortcuts
                     && horizon_client::input::is_quit_shortcut_down(

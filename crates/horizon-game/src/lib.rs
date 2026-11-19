@@ -19,6 +19,15 @@
 //! The platform's own parts register here, in [`main`], as they leave the engine (layer plan M6).
 #![forbid(unsafe_code)]
 
+/// Safe platform bridge for a native Android executable using this same game.
+#[cfg(target_os = "android")]
+pub use horizon_client::android;
+
+/// Install a launcher's public cosmetic before the game starts.
+pub fn install_public_offline_skin(png: &[u8], model: &str) -> Result<(), String> {
+    horizon_client::skins::install_vis_offline_skin(png, model)
+}
+
 /// The game's allocator (mimalloc, with its thread tags), for the executable's
 /// `#[global_allocator]`.
 pub use horizon_threads::{ALLOCATOR, Allocator};

@@ -20,7 +20,9 @@
     "user.auth.xboxlive.com": "Xbox Live sign-in, as the vanilla launcher",
     "xsts.auth.xboxlive.com": "Xbox Live sign-in, as the vanilla launcher",
     "auth.xboxlive.com": "Xbox Live sign-in, as the vanilla launcher",
-    "www.microsoft.com": "Microsoft account links, as the vanilla launcher"
+    "www.microsoft.com": "Microsoft account links, as the vanilla launcher",
+    "piston-data.mojang.com": "Official Minecraft game and runtime downloads",
+    "launcher.mojang.com": "Official Minecraft runtime downloads"
   },
   "not_addresses": {
     "aternos.me": "bluemap_detect.rs: a dynamic-DNS suffix, to guess a server's own map host",

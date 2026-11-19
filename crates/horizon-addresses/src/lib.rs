@@ -42,3 +42,6 @@ pub const STUN_SERVERS: &[&str] = &["stun.cloudflare.com:3478", "stun.l.google.c
 /// Play with Friends' troubleshooting page, shown to hosts nobody can reach.
 pub const FRIENDS_HELP: &str =
     "https://github.com/horizon-rust/horizon/blob/main/docs/play-with-friends.md#troubleshooting";
+
+/// Official Mojang sample textures, fetched at a pinned revision by the Android adapter.
+pub const MOJANG_BEDROCK_SAMPLES: &str = "https://raw.githubusercontent.com/Mojang/bedrock-samples";

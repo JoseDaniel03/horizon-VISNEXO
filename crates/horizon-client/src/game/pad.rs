@@ -369,8 +369,22 @@ impl Game<'_> {
     pub(super) fn poll_pads(&mut self, event_loop: &dyn EventLoopCtl) {
         #[cfg(target_os = "android")]
         {
+            if crate::android::health::sample() {
+                self.audio.trim_decoded_cache();
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.trim_staging_memory();
+                }
+            }
+            if self.android_touch.editor.is_some() {
+                return;
+            }
             self.settings.controller.enabled = true;
-            self.pad.feed = Some(self.android_touch.poll_state().merge(&horizon_client_render::android_runtime::pad_state()));
+            self.pad.feed = Some(
+                self.android_touch
+                    .controls
+                    .poll_state()
+                    .merge(&horizon_client_render::android_runtime::pad_state()),
+            );
         }
         self.pad.virtual_input = self.pad.injected != PadState::default();
         let context = self.pad_context();

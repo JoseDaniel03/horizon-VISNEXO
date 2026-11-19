@@ -24,5 +24,8 @@ pub mod ticks;
 pub mod release;
 pub mod version;
 
+/// Public distribution name; Minecraft protocol/save versions remain unchanged.
+pub const CLIENT_NAME: &str = "VIS Nexo";
+
 pub use level_key::LevelKey;
 pub use version::VANILLA_VERSION;

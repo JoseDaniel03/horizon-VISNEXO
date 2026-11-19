@@ -2,7 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-feature android:glEsVersion="0x00030000" android:required="true" />
-    <application android:label="VIS McRust" android:appCategory="game" android:extractNativeLibs="true" android:usesCleartextTraffic="false">
+    <application android:label="VIS Nexo · Rust" android:appCategory="game" android:extractNativeLibs="true" android:usesCleartextTraffic="false">
+        <provider android:name="dev.horizon.android.VisGameStore" android:authorities="${applicationId}.worlds" android:exported="true" />
         <activity android:name="android.app.NativeActivity" android:exported="true" android:launchMode="singleTop" android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|density|screenLayout" android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
             <meta-data android:name="android.app.lib_name" android:value="horizon_android" />
         </activity>

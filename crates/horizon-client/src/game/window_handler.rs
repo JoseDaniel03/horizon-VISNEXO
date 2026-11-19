@@ -61,7 +61,9 @@ impl Game<'_> {
         origin: input_trace::InputOrigin,
     ) {
         #[cfg(target_os = "android")]
-        if self.android_suspended { return; }
+        if self.android_suspended {
+            return;
+        }
         // A headless game has no window: its events (the frame, the control socket's input)
         // carry `WindowId::dummy()`.
         let ours = match &self.window {
@@ -73,10 +75,35 @@ impl Game<'_> {
         }
         #[cfg(target_os = "android")]
         {
-            if matches!(event, WindowEvent::Focused(false)) { self.android_touch.clear(); }
+            if matches!(event, WindowEvent::Resized(_)) {
+                self.android_touch_viewport(self.android_touch.editor.is_some());
+            }
+            if matches!(event, WindowEvent::Focused(false)) {
+                self.android_touch.controls.clear();
+                self.android_touch.menu_finger = None;
+                horizon_client_render::android_runtime::clear_gamepads();
+            }
             if let WindowEvent::Touch(touch) = &event {
-                self.android_touch_event(event_loop,id,*touch,origin);
+                self.android_touch_event(event_loop, id, *touch, origin);
                 return;
+            }
+        }
+        #[cfg(target_os = "android")]
+        if self.android_touch.editor.is_some() {
+            match &event {
+                WindowEvent::KeyboardInput { event, .. } => {
+                    if event.state == ElementState::Pressed
+                        && event.physical_key == winit::keyboard::PhysicalKey::Code(KeyCode::Escape)
+                    {
+                        self.android_cancel_editor();
+                    }
+                    return;
+                }
+                WindowEvent::MouseInput { .. }
+                | WindowEvent::CursorMoved { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::Ime(_) => return,
+                _ => {}
             }
         }
         if locks_out(origin, self.scripted_run(), &event) {
@@ -184,7 +211,9 @@ impl Game<'_> {
     /// save, world entry, the control socket, pads), then the next frame.
     pub(super) fn idle(&mut self, event_loop: &dyn EventLoopCtl) {
         #[cfg(target_os = "android")]
-        if self.android_suspended { return; }
+        if self.android_suspended {
+            return;
+        }
         // A splitscreen player's game has nothing to save: P1's shuts the process down.
         if horizon_threads::stop_requests() > 0
             && !self.options.split_guest
@@ -289,23 +318,57 @@ impl Game<'_> {
 
 impl ApplicationHandler for Game<'_> {
     #[cfg(target_os = "android")]
+    fn memory_warning(&mut self, _event_loop: &ActiveEventLoop) {
+        self.audio.trim_decoded_cache();
+        if let Some(renderer) = &mut self.renderer {
+            renderer.trim_staging_memory();
+        }
+        log::info!("Android memory pressure: released decoded sound cache");
+    }
+    #[cfg(target_os = "android")]
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         self.android_suspended = true;
-        self.android_touch.clear();
+        self.android_touch.controls.clear();
+        self.android_touch.menu_finger = None;
         self.capture(false);
         self.keys.clear();
         self.physical_keys.clear();
-        if self.title.is_none() && self.screen == Screen::Playing { self.screen = Screen::Paused; }
+        horizon_client_render::android_runtime::clear_gamepads();
+        horizon_client_render::android_runtime::clear_keypad();
+        if let Some(editor) = self.android_touch.editor.take() {
+            self.android_touch.controls.settings = editor.original;
+        }
+        self.audio.trim_decoded_cache();
+        if self.title.is_none() && self.screen == Screen::Playing {
+            self.screen = Screen::Paused;
+        }
         self.pause = self.pauses_game();
-        if let Some(server) = &self.integrated { server.set_paused(self.pause); }
-        if let Some(renderer) = &mut self.renderer { renderer.suspend_surface(); }
+        if let Some(server) = &self.integrated {
+            server.set_paused(self.pause);
+            // Post to the owner thread: never block the Android lifecycle callback on disk IO.
+            if !server.post(|game| {
+                if let Err(error) = game.save_game().and_then(|()| game.save.flush()) {
+                    log::error!("Android background checkpoint failed: {error}");
+                }
+            }) {
+                log::warn!("Android background checkpoint: server already stopped");
+            }
+        }
+        self.settings.save(&Self::options_path());
+        if let Some(renderer) = &mut self.renderer {
+            renderer.trim_staging_memory();
+            renderer.suspend_surface();
+        }
     }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(target_os = "android")]
         if self.android_suspended {
             self.android_suspended = false;
             if let Some(renderer) = &mut self.renderer {
-                if let Err(error) = renderer.recreate_surface() { self.error = Some(error); event_loop.exit(); }
+                if let Err(error) = renderer.recreate_surface() {
+                    self.error = Some(error);
+                    event_loop.exit();
+                }
             }
             self.previous = Instant::now();
             return;
@@ -318,8 +381,9 @@ impl ApplicationHandler for Game<'_> {
         let fullscreen = self.settings.fullscreen || self.options.fullscreen;
         let size = self.options.window_size.map(f64::from);
         self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
-        let attributes =
-            horizon_client::window::with_icon(Window::default_attributes().with_title("Horizon"));
+        let attributes = horizon_client::window::with_icon(
+            Window::default_attributes().with_title(horizon_core::CLIENT_NAME),
+        );
         // Wayland names the window by its app id, which the horizon.desktop entry matches.
         #[cfg(target_os = "linux")]
         let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(

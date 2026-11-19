@@ -372,6 +372,8 @@ pub enum Mode {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     None,
+    /// Open the account-scoped VIS panel supplied by Nexo.
+    VisFriends,
     Quit,
     Options,
     Accessibility,
@@ -1964,7 +1966,7 @@ impl Title {
                         y + 72.0,
                         20.0,
                         &lang::get_or(key, plain),
-                        id != 5 || crate::multiplayer::has_title_entry(),
+                        id != 5 || vis_portals_title() || crate::multiplayer::has_title_entry(),
                         id,
                     );
                     button.icon = Some((icon, 15.0));
@@ -2725,7 +2727,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                         ];
                     }
                 }
-                let version = format!("Horizon {} (Rust)", horizon_core::VANILLA_VERSION);
+                let version = crate::title_edition::distribution_version();
                 batch.text(atlas, &version, 2.0, h - 10.0, u32::MAX, true);
                 // A nightly names its build in the top-left corner, the one spot no button reaches at any GUI
                 // scale, so screenshots and reports say which build they come from.
@@ -3789,6 +3791,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 },
                 crate::multiplayer::Outcome::None => Action::None,
             },
+            (Mode::Main, Some(5)) if vis_portals_title() => Action::VisFriends,
             (Mode::Main, Some(5)) => {
                 self.mode = crate::multiplayer::title_entry().map_or(Mode::Main, Mode::Multiplayer);
                 Action::None
@@ -5479,3 +5482,6 @@ mod classic_tests {
         }
     }
 }
+
+/// A VIS-only entry; standard Horizon keeps its original Friends page.
+fn vis_portals_title()->bool { cfg!(feature="horizon-extras") && std::env::var_os("VIS_PORTALS_ENDPOINT").is_some() }

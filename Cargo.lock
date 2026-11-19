@@ -1435,9 +1435,11 @@ name = "horizon-android"
 version = "0.1.0"
 dependencies = [
  "android_logger",
- "horizon-client",
- "horizon-core",
+ "base64 0.22.1",
+ "horizon-addresses",
+ "horizon-game",
  "horizon-official",
+ "horizon-platform",
  "jni 0.21.1",
  "log",
  "serde",

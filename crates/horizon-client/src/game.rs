@@ -55,6 +55,8 @@ mod advancements_screen;
 mod agent;
 mod agent_settings;
 mod allays;
+#[cfg(target_os = "android")]
+mod android_touch;
 mod armor_stands;
 mod atlas_slots;
 mod attachment_sync;
@@ -144,8 +146,6 @@ mod entity;
 mod entity_culling;
 mod entity_sounds;
 mod event_loop;
-#[cfg(target_os = "android")]
-mod android_touch;
 mod events;
 mod execution_role;
 mod explosion;
@@ -2373,7 +2373,7 @@ struct Game<'a> {
     /// Controllers (Horizon's own).
     pad: pad::Pads,
     #[cfg(target_os = "android")]
-    android_touch: horizon_client_render::touch::TouchControls,
+    android_touch: android_touch::State,
     #[cfg(target_os = "android")]
     android_suspended: bool,
     frames: u64,
@@ -5919,7 +5919,10 @@ impl Game<'_> {
             return batch;
         }
         #[cfg(feature = "friends")]
-        if self.title.is_some() && self.screen == Screen::Friends && self.vis_portals_bridge.is_some() {
+        if self.title.is_some()
+            && self.screen == Screen::Friends
+            && self.vis_portals_bridge.is_some()
+        {
             self.draw_vis_portals(&mut batch);
             return batch;
         }
@@ -12388,11 +12391,7 @@ pub fn run_with() -> Result<()> {
     horizon_world::datafix::set_resources(
         &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
     );
-    #[cfg(target_os = "android")]
-    let downloading = crate::android::has_resource_installer();
-    #[cfg(not(target_os = "android"))]
-    let downloading = false;
-    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()).filter(|_| !downloading) {
+    if let Some(error) = missing_resources(&vanilla_root, horizon_hooks::engine::get_the_game()) {
         // The game build started by hand (the release's zip), not by the
         // launcher: a window says where to get it. Scripts and servers get
         // the error.
@@ -12415,7 +12414,7 @@ pub fn run_with() -> Result<()> {
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models();
     mods::register_layer_definitions();
-    let mut early_settings = Settings::load(&Game::options_path());
+    let mut early_settings = options::platform_settings(&Game::options_path());
     // The player's Polytone pack options (#11486), before any pack is read.
     horizon_client::packs::set_polytone_choices(horizon_client::packs::load_polytone_choices(
         &horizon_client::packs::polytone_choices_file(),

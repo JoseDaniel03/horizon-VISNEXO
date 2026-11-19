@@ -369,51 +369,8 @@ impl Drop for MixerBackend {
 static SHARED_CHANNELS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Two players' copies of one sound: started within this of each other.
 const SAME_SOUND: std::time::Duration = std::time::Duration::from_millis(150);
-/// Decoded interleaved samples, their rate and channel count (`None`: the file did not load).
-type Samples = Option<(Arc<Vec<f32>>, u32, u16)>;
-/// Decoded static sounds (`SoundBufferLibrary`'s buffers), dropped least
-/// recently used first past `CACHE_BYTES`: kept forever, every sound heard in
-/// a session stayed (up to 1.4 GiB of samples, villages playing hundreds).
-#[derive(Default)]
-struct SoundCache {
-    entries: HashMap<String, (Samples, u64)>,
-    bytes: usize,
-    clock: u64,
-}
-const CACHE_BYTES: usize = 64 << 20;
-impl SoundCache {
-    fn get(&mut self, key: &str) -> Option<Samples> {
-        self.clock += 1;
-        let entry = self.entries.get_mut(key)?;
-        entry.1 = self.clock;
-        Some(entry.0.clone())
-    }
-    fn insert(&mut self, key: String, samples: Samples) {
-        self.clock += 1;
-        self.bytes += Self::size(&samples);
-        if let Some((old, _)) = self.entries.insert(key, (samples, self.clock)) {
-            self.bytes -= Self::size(&old);
-        }
-        while self.bytes > CACHE_BYTES && self.entries.len() > 1 {
-            let Some(oldest) = self
-                .entries
-                .iter()
-                .min_by_key(|(_, (_, used))| *used)
-                .map(|(k, _)| k.clone())
-            else {
-                break;
-            };
-            if let Some((gone, _)) = self.entries.remove(&oldest) {
-                self.bytes -= Self::size(&gone);
-            }
-        }
-    }
-    fn size(samples: &Samples) -> usize {
-        samples
-            .as_ref()
-            .map_or(0, |(s, _, _)| s.len() * std::mem::size_of::<f32>())
-    }
-}
+mod decoded_cache;
+use decoded_cache::{Samples, SoundCache};
 /// A static sound to decode for a channel waiting on it.
 struct Decode {
     key: String,
@@ -2135,6 +2092,12 @@ impl Audio {
             .lock()
             .map_or((0, 0), |c| (c.entries.len(), c.bytes))
     }
+    /// Drop cache ownership of decoded buffers. Playing channels retain their samples.
+    pub fn trim_decoded_cache(&self) {
+        if let Ok(mut cache) = self.backend.cache.lock() {
+            cache.trim();
+        }
+    }
     /// Every sound event id (for command completion).
     /// The engine's table sizes and the mixer's channels (`status`).
     pub fn census(&self) -> serde_json::Value {
@@ -2406,26 +2369,6 @@ mod tests {
         c
     }
 
-    #[test]
-    fn decoded_sounds_stay_within_the_budget_least_recently_used_out() {
-        let mut cache = SoundCache::default();
-        let quarter = CACHE_BYTES / 4 / std::mem::size_of::<f32>();
-        let sound = || Some((Arc::new(vec![0.0f32; quarter]), 44100, 1));
-        for key in ["a", "b", "c", "d"] {
-            cache.insert(key.into(), sound());
-        }
-        assert!(cache.get("a").is_some());
-        cache.insert("e".into(), sound());
-        assert!(cache.bytes <= CACHE_BYTES);
-        assert!(
-            cache.get("b").is_none(),
-            "the least recently used goes first"
-        );
-        assert!(cache.get("a").is_some() && cache.get("e").is_some());
-        // A failed load is remembered without counting.
-        cache.insert("missing".into(), None);
-        assert_eq!(cache.get("missing"), Some(None));
-    }
     #[test]
     fn output_stays_off_on_a_virtual_screen_unless_asked() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {
