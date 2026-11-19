@@ -720,6 +720,36 @@ impl Injection {
 /// The bundles in `folder`: the folder itself when it is one (a `horizon-mixin.toml`, or an
 /// unpacked `.hnmod`: `horizon-native.json` and `mixins/<id>/`), else each of its subfolders that is.
 pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    if folder.is_file() {
+        // Accept the actual .hnmod delivered by GitHub Actions, not only an
+        // already-unzipped directory. Horizon's Bundle reader validates
+        // paths, symlinks, sizes, names, manifest and pinned revisions.
+        if folder.extension().is_none_or(|ext| ext != "hnmod") {
+            return Err(format!(
+                "{} is not a Horizon native .hnmod. If downloaded from GitHub                  Actions, unzip the outer artifact ZIP first.",
+                folder.display()
+            ));
+        }
+        let archive = horizon_mods::index::native::Bundle::read(folder)
+            .map_err(|error| format!("Invalid native .hnmod {}: {error}", folder.display()))?;
+        let source = fs::read(folder).map_err(|e| e.to_string())?;
+        let digest = Sha256::digest(&source);
+        let key = digest[..12].iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let unpacked = root().join("file-import").join(&key);
+        if !unpacked.join(NATIVE_MANIFEST).is_file() {
+            fs::create_dir_all(&unpacked).map_err(|e| e.to_string())?;
+            for (name, bytes) in archive.source_files() {
+                let destination = unpacked.join(name);
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                fs::write(&destination, bytes).map_err(|e| e.to_string())?;
+            }
+        }
+        return bundle_in(&unpacked)?
+            .map(|bundle| vec![bundle])
+            .ok_or_else(|| format!("Unrecognized .hnmod: {}", folder.display()));
+    }
     if let Some(found) = bundle_in(folder)? {
         return Ok(vec![found]);
     }
