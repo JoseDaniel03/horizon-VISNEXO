@@ -63,24 +63,24 @@ fn android_main(app:AndroidApp){
         std::fs::rename(temp,home.join("engine-data.zip"))
     })();
     if let Err(error)=copy {log::error!("Engine resources: {error}");return;}
-    let resources=home.join(".local/horizon-client").join(horizon_core::VANILLA_VERSION);
+    let resources=home.join(".local/horizon-client").join(horizon_game::VANILLA_VERSION);
     let requested_vsclient=request.vsclient;
     let mut args=vec!["--resources".into(),resources.to_string_lossy().into_owned(),"--game-dir".into(),game.to_string_lossy().into_owned(),"--home".into(),home.to_string_lossy().into_owned(),"--name".into(),request.name,"--fullscreen".into(),"--render-distance".into(),"6".into()];
     if !request.server.is_empty(){args.extend(["--server".into(),request.server]);}
     let _=HOME.set(home);
-    horizon_client::android::initialize(app,args,prepare);
+    horizon_game::android::initialize(app,args,prepare);
     horizon_official::register();
     #[cfg(feature = "vis-vsclient")]
     if requested_vsclient || vis_autoload::wants_vsclient_in(&game) {
-        horizon_client::mod_api::name_mods(&["vsclient"]);
-        let mods: horizon_client::mod_api::Mods =
+        horizon_game::mod_api::name_mods(&["vsclient"]);
+        let mods: horizon_game::mod_api::Mods =
             std::sync::Arc::from(vec![vis_vsclient::hooks()]);
         log::info!("Native VSClient {} enabled for current McRust Android instance",
             vis_autoload::VERSION);
-        horizon_client::entry::main_with(mods);
+        horizon_game::main_with(mods);
         std::process::exit(0);
     }
-    horizon_client::entry::main();
+    horizon_game::main();
     // Winit owns one loop per process. Saving/shutdown completed before returning.
     std::process::exit(0);
 }
