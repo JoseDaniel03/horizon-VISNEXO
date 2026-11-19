@@ -16,7 +16,7 @@ vis-vsclient = ["dep:horizon-client", "dep:horizon-mods"]
 [dependencies]
 # VIS-only native trait mod is already compiled into the game; players never
 # link or execute Rust code from an unreviewed .hnmod at run time.
-horizon-client = { path = "../horizon-client", optional = true }
+horizon-client = { path = "../horizon-client", default-features = false, optional = true }
 horizon-mods = { path = "../horizon-mods", features = ["index"], optional = true }
 horizon-platform = { path = "../horizon-platform" }
 horizon-heartbeat = { path = "../horizon-heartbeat" }
