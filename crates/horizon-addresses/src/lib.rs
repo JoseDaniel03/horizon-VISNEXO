@@ -45,5 +45,4 @@ pub const FRIENDS_HELP: &str =
 
 /// Mojang's public Bedrock sample controls. Android fetches these pinned,
 /// hashed reference assets when building its optional touch-control pack.
-pub const BEDROCK_SAMPLES_RAW: &str =
-    "https://raw.githubusercontent.com/Mojang/bedrock-samples";
+pub const BEDROCK_SAMPLES_RAW: &str = "https://raw.githubusercontent.com/Mojang/bedrock-samples";
