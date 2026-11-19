@@ -6,6 +6,13 @@ on:
       - 'crates/horizon-client/Cargo.toml'
       - 'crates/horizon-client/src/mod_api.rs'
       - 'crates/horizon-client/tests/vsclient_native_port.rs'
+      - 'launcher/src/native_mods.rs'
+      - 'launcher/src/native_mods_tests.rs'
+      - 'launcher/src/native_mods/**'
+      - 'crates/horizon-android/**'
+      - 'crates/horizon-official/**'
+      - 'crates/horizon-game/**'
+      - 'tools/android_build.py'
       - '.github/workflows/visclient-native.yml'
   pull_request:
     paths:
@@ -13,6 +20,13 @@ on:
       - 'crates/horizon-client/Cargo.toml'
       - 'crates/horizon-client/src/mod_api.rs'
       - 'crates/horizon-client/tests/vsclient_native_port.rs'
+      - 'launcher/src/native_mods.rs'
+      - 'launcher/src/native_mods_tests.rs'
+      - 'launcher/src/native_mods/**'
+      - 'crates/horizon-android/**'
+      - 'crates/horizon-official/**'
+      - 'crates/horizon-game/**'
+      - 'tools/android_build.py'
       - '.github/workflows/visclient-native.yml'
 
 permissions:
@@ -34,6 +48,18 @@ jobs:
           rustc --edition=2024 --test integrations/vsclient-horizon/api/src/core.rs \
             -o /tmp/visclient-mcrust-protocol-tests
           /tmp/visclient-mcrust-protocol-tests --nocapture
+          rustc --edition=2024 --test integrations/vsclient-horizon/api/src/controls.rs \
+            -o /tmp/visclient-mcrust-controls-tests
+          /tmp/visclient-mcrust-controls-tests --nocapture
+          rustc --edition=2024 --test integrations/vsclient-horizon/api/src/feedback.rs \
+            -o /tmp/visclient-mcrust-feedback-tests
+          /tmp/visclient-mcrust-feedback-tests --nocapture
+          rustc --edition=2024 --test integrations/vsclient-horizon/api/src/diagnostics.rs \
+            -o /tmp/visclient-mcrust-diagnostics-tests
+          /tmp/visclient-mcrust-diagnostics-tests --nocapture
+          rustc --edition=2024 --test integrations/vsclient-horizon/api/src/touch.rs \
+            -o /tmp/visclient-mcrust-touch-tests
+          /tmp/visclient-mcrust-touch-tests --nocapture
       - name: Verify native bundle manifest and supported feature hooks
         run: |
           python3 - <<'PY'
@@ -46,7 +72,10 @@ jobs:
           assert (root/'api/Cargo.toml').is_file()
           source = (root/'api/src/lib.rs').read_text()
           for hook in ('client_packet(', 'camera_pose(', 'compute_fov(',
-                       'client_player_network_logging_in(', 'client_disconnecting('):
+                       'client_player_network_logging_in(', 'client_disconnecting(',
+                       'client_tick_post(', 'key(', 'gui_render_post(',
+                       'screen_render_post(', 'screen_key_pressed_pre(', 'screen_mouse_button_pressed_pre(',
+                       'camera_shake(', 'render_hand_pose(', 'movement_input(', 'mouse_button_pre(', 'world_primitives(', 'client_tick_post('):
               assert hook in source, hook
           assert 'virgoland:hello' in (root/'api/src/core.rs').read_text()
           assert not list(root.rglob('*.jar'))
@@ -72,3 +101,159 @@ jobs:
       - name: Compile VSClient adapter against Horizon's real native hook trait
         run: |
           cargo check --locked -p horizon-client --test vsclient_native_port --no-default-features
+
+  embedded-client:
+    name: VSClient prelinked gameplay client
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Native client system audio and controller libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+      - name: Typecheck complete Horizon client with built-in VSClient feature
+        run: |
+          cargo check --locked -p horizon-official --bin horizon-official --features horizon-official/vis-vsclient
+          cargo check --locked -p horizon-client --bin horizon-client --features vis-vsclient
+          cargo check --locked -p horizon-client --bin horizon-client --no-default-features --features vis-vsclient
+
+  android-arm64:
+    name: VSClient prelinked Android ARM64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install NDK, build tools and check McRust + VSClient
+        shell: bash
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;28.2.13676358' 'build-tools;35.0.0'
+          python3 tools/android_build.py --check --abi arm64-v8a \
+            --sdk "$ANDROID_HOME" --java-home "$JAVA_HOME" \
+            --ndk-version 28.2.13676358 --build-tools-version 35.0.0
+
+  native-loader:
+    name: Native mod recognition and install
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher
+          shared-key: vsclient-native-loader
+      - name: Install Linux libraries required by Horizon launcher
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev patchelf
+      - name: Verify .hnmod is detected and its fork SHA is preserved
+        run: |
+          cargo test --manifest-path launcher/Cargo.toml --locked --lib             native_archive_file_is_discovered_as_trait_mod_without_unzipping -- --nocapture
+
+  package:
+    name: Installable .hnmod
+    needs: [protocol, native-api, native-loader]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Package the actual Horizon native mod
+        env:
+          HORIZON_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p dist
+          python3 integrations/vsclient-horizon/package_native.py \
+            --horizon "$HORIZON_SHA" \
+            --out dist/VSClient-MCRust-0.4.1.hnmod
+          sha256sum dist/VSClient-MCRust-0.4.1.hnmod | tee dist/SHA256SUMS.txt
+          cat > dist/INSTALAR.txt <<'EOF'
+          VSCLIENT MCRUST 0.4.1 - MOD NATIVO HORIZON
+          ============================================
+          Archivo: VSClient-MCRust-0.4.1.hnmod
+
+          INSTALACIÓN AUTOMÁTICA EN VIS NEXO (PC):
+          1. Extraé el .hnmod del ZIP externo descargado de GitHub Actions.
+          2. Copiá el .hnmod a la raíz de tu instancia McRust o a mods/.
+          3. Pulsá Jugar. VIS Nexo actualizado lo valida y activa solo.
+          4. El motor VIS actualizado ya tiene VSClient compilado en Rust;
+             no hace falta Python, un compilador o Native build manual.
+
+          Necesitás VIS Nexo y el motor McRust con VSClient 0.4.1
+          integrado. Una versión anterior te avisará que hay que
+          actualizar el motor, en vez de ignorar silenciosamente el mod.
+
+          PARA DESARROLLADORES DEL HORIZON LAUNCHER INDEPENDIENTE:
+          horizon-launcher native-build VSClient-MCRust-0.4.1.hnmod --instance INSTANCIA --allow-version-mismatch --trust-native-code
+          Esa ruta compila el mod nativo y requiere autorización.
+
+          ANDROID: requiere una APK recompilada con VSClient; el launcher
+          Android debe activar VSClient por instancia en su handoff.
+          Copiar .hnmod a la carpeta privada de otra app no funciona.
+          No se ha probado en un teléfono real.
+          No es un JAR Fabric ni una APK.
+          Solo se habilita código VSClient compilado y revisado en VIS.
+          Funciones V1, V3 parcial, controles, UI, VSRender y diagnóstico.
+          GPU multicámara, BBModel y efectos completos siguen pendientes.
+          EOF
+      - name: Validate with Horizon's real .hnmod bundle reader
+        env:
+          HORIZON_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p crates/horizon-mods/tests
+          cat > crates/horizon-mods/tests/vsclient_package_ci.rs <<'EOF'
+          #[test]
+          fn accepts_vsclient_native_mod_manifest_and_source_files() {
+              let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                  .join("../../dist/VSClient-MCRust-0.4.1.hnmod");
+              let bundle = horizon_mods::index::native::Bundle::read(&path)
+                  .expect("Horizon must accept the installable .hnmod archive");
+              assert_eq!(bundle.manifest.id, "vsclient");
+              assert_eq!(bundle.manifest.version, "0.4.1");
+              assert_eq!(bundle.manifest.game, "26.3");
+              // VSClient requires the fork's CustomPayload additions, not only
+              // the numeric native hooks version shared by other revisions.
+              assert_eq!(bundle.manifest.hooks, None);
+              assert_eq!(bundle.manifest.horizon, std::env::var("HORIZON_SHA").unwrap());
+              assert!(bundle.files.contains_key("mixins/vsclient/api/src/lib.rs"));
+              assert!(bundle.files.contains_key("mixins/vsclient/horizon-mixin.toml"));
+          }
+          EOF
+          cargo test --locked -p horizon-mods --features index --test vsclient_package_ci -- --nocapture
+      - name: Install VSClient in isolated Horizon instance and verify recognition
+        run: |
+          cp integrations/vsclient-horizon/install_vsclient.py dist/INSTALAR_VSCLIENT.py
+          mkdir -p /tmp/vsclient-horizon-test-instance
+          python3 dist/INSTALAR_VSCLIENT.py \
+            --hnmod dist/VSClient-MCRust-0.4.1.hnmod \
+            --instance /tmp/vsclient-horizon-test-instance --check-only
+          python3 dist/INSTALAR_VSCLIENT.py \
+            --hnmod dist/VSClient-MCRust-0.4.1.hnmod \
+            --instance /tmp/vsclient-horizon-test-instance
+          test -s /tmp/vsclient-horizon-test-instance/horizon-native-mods/vsclient.hnmod
+          grep -qx 'mod.vsclient:true' /tmp/vsclient-horizon-test-instance/horizon-mods.txt
+          python3 dist/INSTALAR_VSCLIENT.py \
+            --hnmod dist/VSClient-MCRust-0.4.1.hnmod \
+            --instance /tmp/vsclient-horizon-test-instance --replace
+          grep -cx 'mod.vsclient:true' /tmp/vsclient-horizon-test-instance/horizon-mods.txt | grep -qx '1'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VSClient-MCRust-0.4.1-HNMOD
+          path: |
+            dist/VSClient-MCRust-0.4.1.hnmod
+            dist/SHA256SUMS.txt
+            dist/INSTALAR.txt
+            dist/INSTALAR_VSCLIENT.py
+          retention-days: 30
+          if-no-files-found: error

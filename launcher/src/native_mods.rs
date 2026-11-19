@@ -720,6 +720,38 @@ impl Injection {
 /// The bundles in `folder`: the folder itself when it is one (a `horizon-mixin.toml`, or an
 /// unpacked `.hnmod`: `horizon-native.json` and `mixins/<id>/`), else each of its subfolders that is.
 pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    if folder.is_file() {
+        // Accept the actual .hnmod delivered by GitHub Actions, not only an
+        // already-unzipped directory. Horizon's Bundle reader validates
+        // paths, symlinks, sizes, names, manifest and pinned revisions.
+        if folder.extension().and_then(|ext| ext.to_str()) != Some("hnmod") {
+            return Err(format!(
+                "{} is not a Horizon native .hnmod. If downloaded from GitHub                  Actions, unzip the outer artifact ZIP first.",
+                folder.display()
+            ));
+        }
+        let archive = horizon_mods::index::native::Bundle::read(folder)
+            .map_err(|error| format!("Invalid native .hnmod {}: {error}", folder.display()))?;
+        let source = fs::read(folder).map_err(|e| e.to_string())?;
+        let digest = Sha256::digest(&source);
+        let key = digest[..12].iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let unpacked = root().join("file-import").join(&key);
+        // Refresh the content atomically enough for a single native build:
+        // never reuse a partial directory from an interrupted extraction.
+        // Native builds own an exclusive build lock; hashes isolate versions.
+        let _ = fs::remove_dir_all(&unpacked);
+        fs::create_dir_all(&unpacked).map_err(|e| e.to_string())?;
+        for (name, bytes) in archive.source_files() {
+            let destination = unpacked.join(name);
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            fs::write(&destination, bytes).map_err(|e| e.to_string())?;
+        }
+        return bundle_in(&unpacked)?
+            .map(|bundle| vec![bundle])
+            .ok_or_else(|| format!("Unrecognized .hnmod: {}", folder.display()));
+    }
     if let Some(found) = bundle_in(folder)? {
         return Ok(vec![found]);
     }
@@ -1085,7 +1117,15 @@ fn remembered(
 
 fn ask_github(repo: &str, revision: &str) -> Result<String, String> {
     let url = format!("https://api.github.com/repos/{repo}/commits/{revision}");
-    let commit = crate::github::json(&url)?;
+    let commit = crate::github::json(&url).or_else(|upstream_error| {
+        if repo != backend::REPO || !is_revision(revision) {
+            return Err(upstream_error);
+        }
+        let fork_url = format!(
+            "https://api.github.com/repos/JoseDaniel03/horizon-VISNEXO/commits/{revision}"
+        );
+        crate::github::json(&fork_url)
+    })?;
     commit["commit"]["committer"]["date"]
         .as_str()
         .map(str::to_owned)
@@ -1124,14 +1164,26 @@ fn hooks_in(source: &str) -> Option<u32> {
     line.trim_end().strip_suffix(';')?.parse().ok()
 }
 
-/// The native hook points' version of Horizon at `revision`, from GitHub (None: it has none).
+/// A specific native hook file at an exact pinned revision. The VIS fork
+/// carries client payload hook types not available in every upstream build.
+fn pinned_source_text(revision: &str, file: &str) -> Option<String> {
+    if !is_revision(revision) { return None; }
+    for repository in [backend::REPO, "JoseDaniel03/horizon-VISNEXO"] {
+        let url = format!(
+            "https://raw.githubusercontent.com/{repository}/{revision}/{file}"
+        );
+        if let Ok(body) = backend::get(&url) {
+            if let Ok(text) = body.into_string() {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+/// The native hook points' version of Horizon at `revision`, from GitHub.
 pub(crate) fn hooks_at(revision: &str) -> Option<u32> {
-    let url = format!(
-        "https://raw.githubusercontent.com/{}/{revision}/{HOOKS_FILE}",
-        backend::REPO
-    );
-    let text = backend::get(&url).ok()?.into_string().ok()?;
-    hooks_in(&text)
+    hooks_in(&pinned_source_text(revision, HOOKS_FILE)?)
 }
 
 /// The named hook points (name, version) a `native-hooks.json` lists; None when it isn't one.
@@ -1150,12 +1202,7 @@ fn catalog_in(text: &str) -> Option<HookCatalog> {
 /// The named hook points of Horizon at `revision`, from GitHub (None: it has no catalog, as
 /// revisions from before d3e0774 that already had hook points v2).
 fn catalog_at(revision: &str) -> Option<HookCatalog> {
-    let url = format!(
-        "https://raw.githubusercontent.com/{}/{revision}/{CATALOG}",
-        backend::REPO
-    );
-    let text = backend::get(&url).ok()?.into_string().ok()?;
-    catalog_in(&text)
+    catalog_in(&pinned_source_text(revision, CATALOG)?)
 }
 
 /// Where Horizon lists its named hook points, at the workspace root (horizon-mixins reads it there).
@@ -1931,7 +1978,26 @@ fn source(revision: &str) -> Result<PathBuf, String> {
         backend::REPO
     );
     let partial = root().join("source").join(format!(".{revision}.partial"));
-    let top = unpack_archive(&archive, &partial, u64::MAX)?;
+    // VIS MCRust ships its own Horizon fork. VSClient's native packet API
+    // exists in fork commits that are not present in upstream Horizon.
+    // Resolve the exact pinned commit from upstream first (unchanged
+    // behaviour for regular mods), then from our fixed, trusted fork.
+    // Never use a branch or "latest": the requested 40-digit SHA is identical
+    // for both archives and the cache is keyed by that SHA.
+    const VIS_FORK: &str = "JoseDaniel03/horizon-VISNEXO";
+    let top = match unpack_archive(&archive, &partial, u64::MAX) {
+        Ok(source) => source,
+        Err(upstream_error) => {
+            let from_fork = format!(
+                "https://codeload.github.com/{VIS_FORK}/tar.gz/{revision}"
+            );
+            unpack_archive(&from_fork, &partial, u64::MAX).map_err(|fork_error| {
+                format!(
+                    "Cannot download pinned Horizon {revision} from upstream or the VIS fork.                     Upstream: {upstream_error}; VIS fork: {fork_error}"
+                )
+            })?
+        }
+    };
     fs::write(top.join(".horizon-revision"), revision).map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&dir);
     fs::rename(&top, &dir).map_err(|e| e.to_string())?;

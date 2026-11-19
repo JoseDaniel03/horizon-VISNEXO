@@ -33,3 +33,9 @@ pub const MOD_API_LEVEL: [u8; horizon_mods::api_level::MARK.len()] = horizon_mod
 pub fn main() {
     horizon_client::entry::main();
 }
+
+/// VIS builds may prelink a known native client mod, then select it for
+/// one instance using its .hnmod identity. This never loads ZIP code.
+pub fn main_with(mods:horizon_client::mod_api::Mods){
+    horizon_client::entry::main_with(mods);
+}

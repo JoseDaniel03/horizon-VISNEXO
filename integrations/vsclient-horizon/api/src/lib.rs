@@ -1,62 +1,501 @@
-//! VSClient native adapter for Horizon/MCRust, not a Fabric JAR.
-//! Uses Horizon's public trait hooks. Gameplay remains server authoritative.
-//! This first port implements protocol 8 hello and cinematic camera/FOV.
-//! Missing Java-only features are intentionally NOT advertised to the server.
+//! VSClient native for VIS McRust / Horizon 26.3.
+//! Shares the Java VSClient Bridge protocol 8. Server remains authoritative.
 mod core;
+mod cinematic;
+mod feedback;
+mod controls;
+mod ui;
+mod diagnostics;
+mod touch;
 use core::{CameraSession, CHANNEL_CAMERA, MAX_CUE_BYTES, decode_string};
+use diagnostics::{Diagnostics,PacketKind};
+use controls::{ControlsSession, InputAction, CHANNEL_INPUT, CHANNEL_PROFILE, CHANNEL_STATE, CHANNEL_VIEW};
 use horizon_client::mod_api::{
-    CameraPoseEvent, ClientDisconnectingEvent, ClientPacketEvent,
-    ClientPlayerNetworkLoggingInEvent, ClientboundPlayPacket, ComputeFovEvent,
-    CustomPayload, Hooks, Host, ServerboundPlayPacket,
+    CameraPoseEvent, ClientDisconnectingEvent, ClientPacketEvent, GuiRenderPostEvent,
+    ClientPlayerNetworkLoggingInEvent, ClientTickPostEvent, ClientboundPlayPacket, ComputeFovEvent,
+    CustomPayload, Hooks, Host, KeyEvent, NativeScreenKind, ServerboundPlayPacket,
+    ClientStartEvent, Flow, ScreenRenderPostEvent, ScreenKeyPressedPreEvent,
+    ScreenMouseButtonPressedPreEvent, MouseButtonPreEvent, MovementInputEvent,
+    CameraShakeEvent, RenderHandPoseEvent, Hand, GuiDraw, Text, WorldPrimitivesEvent,
 };
-use std::{sync::Mutex, time::Instant};
+use std::{sync::{Mutex,atomic::{AtomicBool,Ordering}}, time::Instant};
 
 pub fn hooks() -> Box<dyn Hooks> {
-    Box::new(VsClientHorizon { camera: Mutex::new(CameraSession::default()) })
+    Box::new(VsClientHorizon {
+        camera: Mutex::new(CameraSession::default()),
+        cinematic: Mutex::new(cinematic::Session::default()),
+        feedback: Mutex::new(feedback::Session::default()),
+        controls: Mutex::new({
+            let mut controls=ControlsSession::default();
+            let _=controls.set_virtual_enabled(cfg!(target_os="android"));
+            controls
+        }),
+        zoom: Mutex::new(1.0),
+        diagnostics: Mutex::new(Diagnostics::default()),
+        ticket_used: AtomicBool::new(false),
+    })
 }
 struct VsClientHorizon {
     camera: Mutex<CameraSession>,
+    cinematic: Mutex<cinematic::Session>,
+    feedback: Mutex<feedback::Session>,
+    controls: Mutex<ControlsSession>,
+    zoom: Mutex<f32>,
+    diagnostics: Mutex<Diagnostics>,
+    ticket_used: AtomicBool,
+}
+fn send_actions(host: &mut dyn Host, actions: Vec<InputAction>, diagnostics: &Mutex<Diagnostics>) {
+    for action in actions {
+        // Matches Fabric InputPayload and Bridge VirgolandInput exactly.
+        let phase = if action.pressed { "press" } else { "release" };
+        let wire = format!("{}|{}|{}|{}", core::PROTOCOL, action.sequence, action.id, phase);
+        if let Ok(data) = core::encode_string(&wire) {
+            let ok = host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
+                channel: CHANNEL_INPUT.into(), data,
+            })).is_ok();
+            if let Ok(mut diag)=diagnostics.lock(){diag.sent(ok);}
+        }
+    }
+}
+fn in_world(host: &dyn Host) -> bool {
+    host.client_state().is_some_and(|s| s.focused
+        && s.screen == NativeScreenKind::Playing && s.world.is_some())
+}
+/// V3 overlays use Horizon's safe GUI primitives. No direct renderer access:
+/// additional world views, rotated/scaled text and actor geometry need a GPU
+/// implementation before we can advertise the full V3 capability.
+fn paint_scene(host:&dyn Host,batch:&mut horizon_client::mod_api::HudBatch,
+    scene:&cinematic::Scene,width:f32,height:f32)
+{
+    if let Some(view)=scene.views.first() {
+        if let Some(fade)=&view.fade {
+            let opacity=(fade.amount.clamp(0.0,1.0)*255.0).round() as u32;
+            if opacity>0 {
+                let r=&view.rect;
+                host.fill(batch,[r.x*width,r.y*height,r.w*width,r.h*height],
+                    (opacity<<24)|(fade.color&0xffffff));
+            }
+        }
+    }
+    for e in &scene.effects {
+        let alpha=(e.amount.clamp(0.0,1.0)*255.0).round() as u32;
+        if alpha==0 {continue;}
+        let r=[e.rect.x*width,e.rect.y*height,e.rect.w*width,e.rect.h*height];
+        match e.kind.as_str() {
+            "letterbox" => {
+                let h=(height*0.15*e.amount).min(height*0.2);
+                host.fill(batch,[0.0,0.0,width,h],0xff000000);
+                host.fill(batch,[0.0,height-h,width,h],0xff000000);
+            }
+            "vignette" => {
+                // Bounded, non-shader approximation; a single pass of 8 bands.
+                for i in 0..8_u32 {
+                    let inset=i as f32*width.min(height)*0.018;
+                    let opacity=((alpha as f32)*(1.0-i as f32/8.0)/10.0) as u32;
+                    let color=opacity<<24;
+                    let thick=(height*0.017).max(1.0);
+                    host.fill(batch,[inset,inset,width-2.0*inset,thick],color);
+                    host.fill(batch,[inset,height-inset-thick,width-2.0*inset,thick],color);
+                }
+            }
+            _ => {
+                let rgb=match e.kind.as_str() {
+                    "fade-black"=>0,"fade-white"|"flash"=>0xffffff,_=>e.color&0xffffff
+                };
+                host.fill(batch,r,(alpha<<24)|rgb);
+            }
+        }
+    }
+    // The GUI API accepts alpha-colored rich draw calls. Limit each caption
+    // to eight lines and 200 Unicode scalars per line so a server cannot turn
+    // this into an unbounded glyph-extraction workload.
+    let mut draws=Vec::new();
+    for c in &scene.captions {
+        let alpha=(c.opacity.clamp(0.0,1.0)*255.0).round() as u32;
+        if alpha==0 {continue;}
+        let rgb=(alpha<<24)|(c.color&0xffffff);
+        let x=c.x*width;
+        let top=c.y*height;
+        for (row,line) in c.text.lines().take(8).enumerate() {
+            let label:String=line.chars().take(200).collect();
+            let advance=host.text_width(&label);
+            let left=x-match c.align.as_str() {
+                "center"=>advance*0.5,"right"=>advance,_=>0.0,
+            };
+            draws.push(GuiDraw::Text {
+                text:Text::literal(&label),
+                x:left.round() as i32,
+                y:(top+row as f32*10.0).round() as i32,
+                color:rgb,
+                shadow:true,
+            });
+        }
+    }
+    if !draws.is_empty(){host.gui_paint(batch,&draws);}
+
+}
+
+impl VsClientHorizon {
+    fn record(&self, kind:PacketKind, ok:bool){
+        if let Ok(mut diag)=self.diagnostics.lock(){diag.packet(kind,ok);}
+    }
 }
 impl Hooks for VsClientHorizon {
+    fn client_start(&self, host: &mut dyn Host, _event: &mut ClientStartEvent) {
+        if let Some(saved)=host.setting(ui::ID, "bindings") {
+            if let Ok(mut controls)=self.controls.lock() {
+                let _=controls.load_bindings(&saved);
+            }
+        }
+        if let Some(enabled)=host.setting(ui::ID,"virtual_enabled"){
+            if let Ok(mut controls)=self.controls.lock(){
+                let _=controls.set_virtual_enabled(enabled=="1");
+            }
+        }
+    }
     fn client_player_network_logging_in(
         &self,
         host: &mut dyn Host,
         _event: &mut ClientPlayerNetworkLoggingInEvent,
     ) {
-        if let Ok(mut camera) = self.camera.lock() { camera.reset(); }
-        // VIS Nexo can supply an ephemeral one-use launcher ticket via the
-        // child process environment. Absent/invalid tickets are never faked;
-        // servers with launcher-auth.enabled=true will reject the session.
+        if let Ok(mut diag)=self.diagnostics.lock(){diag.connect(Instant::now());}
+        if let Ok(mut c) = self.camera.lock() { c.reset(); }
+        if let Ok(mut c) = self.cinematic.lock() { c.reset(); }
+        if let Ok(mut c) = self.controls.lock() { c.reset(); }
+        if let Ok(mut z) = self.zoom.lock() { *z = 1.0; }
+        if let Ok(mut f) = self.feedback.lock() { f.reset(); }
+        // A one-use bridge ticket may be injected by the parent process.
+        // No fake auth, no logging secrets, no disk persistence.
         if let Ok(ticket) = std::env::var("VIS_NEXO_CLIENT_BRIDGE_TICKET") {
             if let Ok(data) = core::auth_ticket(&ticket) {
-                let _ = host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
-                    channel: core::CHANNEL_AUTH.into(), data,
-                }));
+                // One-use credential: never resend the same environment token
+                // when a player changes servers or re-logs during this process.
+                if !self.ticket_used.swap(true,Ordering::AcqRel) {
+                    let sent=host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
+                        channel: core::CHANNEL_AUTH.into(), data,
+                    })).is_ok();
+                    if let Ok(mut diag)=self.diagnostics.lock(){diag.sent(sent);}
+                }
             }
         }
-        // The Java Bridge understands a Minecraft VarInt length-prefixed
-        // UTF-8 string, not raw UTF-8 nor Horizon's own mod-net framing.
-        // We only advertise CAMERA_V1 while cinematic_v3, keys and HUD are pending.
-        let _ = host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
+        let ok=host.send_packet(ServerboundPlayPacket::CustomPayload(CustomPayload {
             channel: core::CHANNEL_HELLO.into(),
             data: core::hello(),
-        }));
+        })).is_ok();
+        if let Ok(mut diag)=self.diagnostics.lock(){diag.hello(ok);}
     }
 
-    fn client_packet(&self, _host: &mut dyn Host, event: &mut ClientPacketEvent<'_>) {
-        let ClientboundPlayPacket::CustomPayload(packet) = event.packet else {return;};
-        if packet.channel != CHANNEL_CAMERA {return;}
-        let Ok(text) = decode_string(&packet.data, MAX_CUE_BYTES) else {return;};
-        if let Ok(mut camera) = self.camera.lock() {
-            let _ = camera.accept(text, Instant::now());
+    fn client_packet(&self, host: &mut dyn Host, event: &mut ClientPacketEvent<'_>) {
+        let ClientboundPlayPacket::CustomPayload(packet) = event.packet else { return };
+        let channel = packet.channel.as_str();
+        if channel == feedback::CHANNEL_EFFECT {
+            let ok=decode_string(&packet.data,128).ok().and_then(|text|
+                self.feedback.lock().ok().map(|mut f|f.accept_effect(text,Instant::now()).is_ok())
+            ).unwrap_or(false);
+            self.record(PacketKind::Render,ok);
+            return;
+        }
+        if channel == feedback::CHANNEL_WEAPON {
+            let ok=decode_string(&packet.data,160).ok().and_then(|text|
+                self.feedback.lock().ok().map(|mut f|
+                    f.accept_weapon(text,Instant::now()).is_ok())
+            ).unwrap_or(false);
+            self.record(PacketKind::Render,ok);
+            return;
+        }
+        if channel == feedback::CHANNEL_RELOAD {
+            let ok=self.feedback.lock().map(|mut f|
+                f.accept_reload(&packet.data,Instant::now()).is_ok()).unwrap_or(false);
+            self.record(PacketKind::Render,ok);
+            return;
+        }
+        let max = if channel == CHANNEL_PROFILE || channel == cinematic::CHANNEL { 30_000 } else { MAX_CUE_BYTES };
+        if !matches!(channel, CHANNEL_CAMERA | CHANNEL_STATE | CHANNEL_PROFILE | CHANNEL_VIEW | "virgoland:controls" | cinematic::CHANNEL) {
+            return;
+        }
+        let kind=match channel{
+            CHANNEL_CAMERA=>PacketKind::Camera,
+            CHANNEL_STATE=>PacketKind::State,
+            CHANNEL_PROFILE=>PacketKind::Profile,
+            CHANNEL_VIEW=>PacketKind::View,
+            cinematic::CHANNEL=>PacketKind::Cinematic,
+            _=>PacketKind::Controls,
+        };
+        let Ok(text) = decode_string(&packet.data, max) else {
+            self.record(kind,false);
+            return;
+        };
+        match channel {
+            cinematic::CHANNEL => {
+                let accepted=self.cinematic.lock().is_ok_and(|mut c|c.accept(text,Instant::now()).is_ok());
+                self.record(PacketKind::Cinematic,accepted);
+                if accepted {
+                    if let Ok(mut camera)=self.camera.lock(){camera.reset();}
+                }
+            }
+            CHANNEL_CAMERA => {
+                let accepted=self.camera.lock().map(|mut c|
+                    c.accept(text,Instant::now()).is_ok()).unwrap_or(false);
+                self.record(PacketKind::Camera,accepted);
+            }
+            CHANNEL_STATE => {
+                let actions = self.controls.lock().ok()
+                    .and_then(|mut c| c.apply_state(text).ok());
+                let accepted=actions.is_some();
+                if let Some(actions) = actions { send_actions(host,actions,&self.diagnostics); }
+                self.record(kind,accepted);
+            }
+            CHANNEL_PROFILE => {
+                let actions = self.controls.lock().ok()
+                    .and_then(|mut c| c.apply_profile(text).ok());
+                if let Some(actions) = actions { send_actions(host,actions,&self.diagnostics); }
+            }
+            "virgoland:controls" => {
+                let accepted=text=="8|open" && host.mod_screen_open(ui::ID);
+                self.record(PacketKind::Controls,accepted);
+            }
+            CHANNEL_VIEW => {
+                let accepted=controls::parse_view(text).ok().and_then(|zoom|
+                    self.zoom.lock().ok().map(|mut current|{*current=zoom;})).is_some();
+                self.record(PacketKind::View,accepted);
+            }
+            _ => {}
+        }
+    }
+
+    fn key(&self, host: &mut dyn Host, event: &mut KeyEvent<'_>) {
+        if event.pressed && in_world(host) && event.key=="key.keyboard.f7" {
+            if let Ok(mut d)=self.diagnostics.lock(){d.toggle();}
+            return;
+        }
+        if event.pressed && in_world(host) && event.key=="key.keyboard.f6" {
+            if let Ok(d)=self.diagnostics.lock() {
+                if d.visible {
+                    host.set_setting(ui::ID,"last_diagnostic",&d.report(Instant::now()));
+                }
+            }
+            return;
+        }
+        if event.pressed && event.key=="key.keyboard.f9" && in_world(host) {
+            let (enabled,actions)=self.controls.lock().map(|mut c|{
+                let next=!c.virtual_enabled();
+                let actions=c.set_virtual_enabled(next);
+                (next,actions)
+            }).unwrap_or((false,vec![]));
+            host.set_setting(ui::ID,"virtual_enabled",if enabled{"1"}else{"0"});
+            send_actions(host,actions,&self.diagnostics);
+            return;
+        }
+        if event.pressed && event.key=="key.keyboard.f8" && in_world(host) {
+            let _=host.mod_screen_open(ui::ID);
+            return;
+        }
+        let playing = in_world(host);
+        let actions = self.controls.lock().ok()
+            .map(|mut c| c.handle_key(event.key, event.pressed, playing));
+        if let Some(actions) = actions { send_actions(host, actions, &self.diagnostics); }
+    }
+
+    fn client_tick_post(&self, host: &mut dyn Host, _event: &mut ClientTickPostEvent) {
+        // Releasing an open menu or losing focus must never leave a remote
+        // vehicle, revive or other hold action stuck down on the server.
+        let playing = in_world(host);
+        if !playing {
+            if let Ok(mut f)=self.feedback.lock(){f.reset();}
+        }
+        let actions = self.controls.lock().ok().map(|mut c| c.heartbeat(playing));
+        if let Some(actions) = actions { send_actions(host, actions, &self.diagnostics); }
+    }
+
+    fn mouse_button_pre(&self, host: &mut dyn Host, event: &mut MouseButtonPreEvent) -> Flow {
+        // Native mouse pre-events are cancellable. If a live server profile
+        // claims this button, send the semantic action BEFORE vanilla mining,
+        // attacking or using an item can consume it.
+        if !in_world(host) {return Flow::Continue;}
+        if event.button==0 {
+            let gui=host.client_state().map_or([0.0,0.0],|s|s.gui_size);
+            let cursor=host.cursor();
+            let (actions,handled)=self.controls.lock().map(|mut c|{
+                if !event.pressed && c.touch_active() {
+                    return (c.touch_release(),true);
+                }
+                if event.pressed && c.virtual_enabled() {
+                    let available=c.virtual_actions();
+                    match touch::hit(cursor,available.len(),c.virtual_page(),gui) {
+                        touch::Hit::Action(i)=>{
+                            if let Some((id,_,_))=available.get(i) {
+                                return (c.touch_press(id),true);
+                            }
+                        }
+                        touch::Hit::Page=>{
+                            c.touch_page_step(available.len(),touch::page_size(gui));
+                            return (vec![],true);
+                        }
+                        touch::Hit::None=>{}
+                    }
+                }
+                (vec![],false)
+            }).unwrap_or((vec![],false));
+            if handled {
+                send_actions(host,actions,&self.diagnostics);
+                return Flow::Cancel;
+            }
+        }
+        if event.button==0 && event.pressed
+            && host.client_state().is_some_and(|s|!s.gui_hidden)
+            && host.client_state().is_some_and(|s|ui::in_button(host.cursor(),s.gui_size[0]))
+        {
+            if host.mod_screen_open(ui::ID) {return Flow::Cancel;}
+        }
+        let (claimed,actions)=self.controls.lock().map(|mut c|{
+            let claimed=c.claimed_mouse(event.button);
+            let key=match event.button {
+                0=>"key.mouse.left",1=>"key.mouse.right",2=>"key.mouse.middle",_=>""
+            };
+            let actions=if claimed {c.handle_key(key,event.pressed,true)} else {vec![]};
+            (claimed,actions)
+        }).unwrap_or((false,vec![]));
+        if claimed {
+            send_actions(host, actions, &self.diagnostics);
+            Flow::Cancel
+        } else {Flow::Continue}
+    }
+
+    fn movement_input(&self, _host: &dyn Host, event: &mut MovementInputEvent) {
+        if let Ok(c)=self.controls.lock(){
+            if c.claims_move(&[87,83]) {event.forward=0.0;}
+            if c.claims_move(&[65,68]) {event.strafe=0.0;}
+            if c.claims_move(&[32]) {event.jump=false;}
+            if c.claims_move(&[340,344]) {event.sneak=false;}
+        }
+    }
+
+    fn screen_render_post(&self, host: &dyn Host, event: &mut ScreenRenderPostEvent<'_>) {
+        if event.screen.id != "mod" || host.mod_screen() != Some(ui::ID) {return;}
+        if let Ok(controls)=self.controls.lock() {
+            ui::draw(host, event, &controls);
+        }
+    }
+
+    fn screen_mouse_button_pressed_pre(&self, host: &dyn Host, event: &mut ScreenMouseButtonPressedPreEvent<'_>) -> Flow {
+        if event.screen.id!="mod" || host.mod_screen()!=Some(ui::ID) {return Flow::Continue;}
+        if let Ok(mut controls)=self.controls.lock() {
+            match ui::click(event.screen,&mut controls,event.button) {
+                ui::Click::None => Flow::Continue,
+                ui::Click::Handled => Flow::Cancel,
+                ui::Click::Save => {
+                    host.set_setting(ui::ID,"bindings",&controls.bindings_wire());
+                    Flow::Cancel
+                }
+            }
+        } else {Flow::Continue}
+    }
+
+    fn screen_key_pressed_pre(&self, host: &dyn Host, event: &mut ScreenKeyPressedPreEvent<'_>) -> Flow {
+        if event.screen.id!="mod" || host.mod_screen()!=Some(ui::ID) || event.repeat {
+            return Flow::Continue;
+        }
+        if let Ok(mut controls)=self.controls.lock() {
+            if controls.capture_id().is_some() {
+                let result=controls.apply_capture(event.key);
+                if result == Ok(true) {
+                    host.set_setting(ui::ID,"bindings",&controls.bindings_wire());
+                }
+                return Flow::Cancel;
+            }
+        }
+        Flow::Continue
+    }
+
+    fn world_primitives(&self, host:&dyn Host, event:&mut WorldPrimitivesEvent<'_>) {
+        // Render short-lived, server-sent VSRender shot flashes where the
+        // client's current entity snapshots put the firing entity. No
+        // dynamic light or damage logic; this is a small software effect.
+        let flashes=self.feedback.lock().map(|mut f|
+            f.visible_flashes(Instant::now())).unwrap_or_default();
+        if !flashes.is_empty() {
+            let entities=host.client_entities();
+            for (actor,color) in flashes.iter().take(256) {
+                let Some(entity)=entities.iter().find(|e|e.id==*actor) else {continue};
+                let [x,y,z]=entity.position;
+                let yaw=entity.yaw.to_radians() as f64;
+                let end=[x-yaw.sin()*0.45,y+1.3,z+yaw.cos()*0.45];
+                if !end.iter().all(|v|v.is_finite()){continue;}
+                event.primitives.filled_box(
+                    [end[0]-0.09,end[1]-0.09,end[2]-0.09],
+                    [end[0]+0.09,end[1]+0.09,end[2]+0.09],*color);
+            }
+        }
+        // Diagnostic storyboard only: 3D actor models and skins need a
+        // dedicated render implementation. This is invisible unless F7 is on.
+        if !self.diagnostics.lock().is_ok_and(|d|d.visible){return;}
+        let Ok(mut cinema)=self.cinematic.lock() else{return;};
+        let Some((scene,time))=cinema.active(Instant::now()) else{return;};
+        for actor in scene.actors.iter().take(16) {
+            let (pose,scale)=actor.sample(time);
+            let r=(scale as f64*0.3).max(0.05);
+            let height=(scale as f64*1.8).max(0.1);
+            let [x,y,z]=pose.pos;
+            if ![x,y,z,r,height].iter().all(|v|v.is_finite()){continue;}
+            let color=if actor.entity_id.is_some(){0xff7cdbb6}else{0xffc6a7ff};
+            event.primitives.box_outline([x-r,y,z-r],[x+r,y+height,z+r],color,1.5);
+            let id:String=actor.id.chars().take(32).collect();
+            event.primitives.text([x,y+height+0.15,z],id,color,0.6).background();
+        }
+    }
+
+    fn camera_shake(&self, host: &dyn Host, event: &mut CameraShakeEvent<'_>) {
+        if !in_world(host) {return;}
+        let now=Instant::now();
+        // Horizon exposes only yaw/pitch for the render camera, so its bounded
+        // visual shake layer handles roll. Respect the engine's 10-degree and
+        // distortion-settings limits; it cannot exactly match Fabric's roll.
+        if let Ok(mut cinema)=self.cinematic.lock() {
+            if let Some((scene,time))=cinema.active(now) {
+                if let Some(pose)=scene.primary_camera(time) {
+                    event.shake.roll+=pose.roll.clamp(-10.0,10.0);
+                    return;
+                }
+            }
+        }
+        if let Ok(mut camera)=self.camera.lock() {
+            if let Some(pose)=camera.sample(now) {
+                event.shake.roll+=pose.roll.clamp(-10.0,10.0);
+                return;
+            }
+        }
+        if let Ok(mut f)=self.feedback.lock(){
+            let recoil=f.sample(now);
+            event.shake.pitch+=recoil.pitch;
+            event.shake.yaw+=recoil.yaw;
+        }
+    }
+
+    fn render_hand_pose(&self, host:&dyn Host, event:&mut RenderHandPoseEvent<'_>) {
+        if !in_world(host) || event.hand!=Hand::Main {return;}
+        if let Ok(mut f)=self.feedback.lock() {
+            let reach=f.reload_reach(Instant::now());
+            event.x+=0.18*reach;
+            event.y-=0.22*reach;
+            event.z-=0.12*reach;
+            event.roll-=25.0*reach;
         }
     }
 
     fn camera_pose(&self, _host: &dyn Host, event: &mut CameraPoseEvent<'_>) {
-        let Ok(mut camera) = self.camera.lock() else {return;};
+        if let Ok(mut cinema)=self.cinematic.lock() {
+            if let Some((scene,time))=cinema.active(Instant::now()) {
+                if let Some(pose)=scene.primary_camera(time) {
+                    *event.position=pose.pos;
+                    event.yaw=pose.yaw;
+                    event.pitch=pose.pitch;
+                    return;
+                }
+            }
+        }
+        let Ok(mut camera) = self.camera.lock() else { return };
         if let Some(pose) = camera.sample(Instant::now()) {
-            // Visual-only; the client's collision, aim and player location
-            // stay vanilla and are validated by the server.
+            // Camera-only. The server continues to own movement and hit tests.
             *event.position = pose.pos;
             event.yaw = pose.yaw;
             event.pitch = pose.pitch;
@@ -64,14 +503,99 @@ impl Hooks for VsClientHorizon {
     }
 
     fn compute_fov(&self, _host: &dyn Host, event: &mut ComputeFovEvent) {
-        let Ok(mut camera) = self.camera.lock() else {return;};
-        if let Some(pose) = camera.sample(Instant::now()) {
-            event.degrees = pose.fov;
+        if let Ok(mut cinema)=self.cinematic.lock() {
+            if let Some((scene,time))=cinema.active(Instant::now()) {
+                if let Some(pose)=scene.primary_camera(time) {
+                    event.degrees=pose.fov;
+                    return;
+                }
+            }
+        }
+        if let Ok(mut camera) = self.camera.lock() {
+            if let Some(pose) = camera.sample(Instant::now()) {
+                event.degrees = pose.fov;
+                return;
+            }
+        }
+        // Server VIEW_V1 zoom is visual only and never changes player speed.
+        let recoil=self.feedback.lock().map(|mut f|f.sample(Instant::now()).fov).unwrap_or(0.0);
+        if let Ok(zoom) = self.zoom.lock() {
+            event.degrees = (event.degrees / *zoom + recoil).clamp(15.0, 150.0);
+        }
+    }
+
+    fn gui_render_post(&self, host: &dyn Host, event: &mut GuiRenderPostEvent<'_>) {
+        // Respect menus, lost focus and world teardown. Do not paint over login.
+        let Some(state) = host.client_state() else { return };
+        if state.screen != NativeScreenKind::Playing || state.world.is_none() { return; }
+        let (width,height) = (event.batch.width,event.batch.height);
+        if width <= 0.0 || height <= 0.0 { return; }
+        if !state.gui_hidden {
+            let b=ui::button_rect(width);
+            host.fill(event.batch,b,0xdf302740);
+            host.text(event.batch,"VS",[b[0]+17.0,b[1]+9.0],0xffefe1ff,true);
+        }
+        if !state.gui_hidden {
+            if let Ok(c)=self.controls.lock(){
+                let available=c.virtual_actions();
+                if !available.is_empty(){
+                    let gui=[width,height];
+                    for slot in touch::slots(available.len(),c.virtual_page(),gui){
+                        let Some((_,label,held))=available.get(slot.index) else{continue};
+                        host.fill(event.batch,slot.rect,
+                            if *held {0xe9865fb2} else {0xdf282e47});
+                        let shortened:String=label.chars().take(12).collect();
+                        host.text(event.batch,&shortened,[slot.rect[0]+6.0,
+                            slot.rect[1]+slot.rect[3]*0.5-4.0],0xfff4efff,true);
+                    }
+                    if let Some(b)=touch::page_rect(available.len(),gui){
+                        host.fill(event.batch,b,0xdf363047);
+                        host.text(event.batch,"Mas controles >",
+                            [b[0]+5.0,b[1]+8.0],0xfff0e9ff,false);
+                    }
+                }
+            }
+        }
+        // Render the bounded V3 effects/captions even for clients whose
+        // server sends scenes without relying on capability negotiation.
+        if let Ok(mut cinema)=self.cinematic.lock(){
+            if let Some((scene,_time))=cinema.active(Instant::now()){
+                paint_scene(host,event.batch,scene,width,height);
+            }
+        }
+        let Ok(mut camera) = self.camera.lock() else { return };
+        for overlay in camera.overlays(Instant::now()) {
+            let alpha = (overlay.alpha.clamp(0.0,1.0) * 255.0).round() as u32;
+            if alpha == 0 { continue; }
+            let color = (alpha << 24) | overlay.rgb;
+            if overlay.letterbox {
+                let bar = (height * 0.12).round();
+                host.fill(event.batch,[0.0,0.0,width,bar],color);
+                host.fill(event.batch,[0.0,height-bar,width,bar],color);
+            } else {
+                host.fill(event.batch,[0.0,0.0,width,height],color);
+            }
+        }
+        if let Ok(d)=self.diagnostics.lock() {
+            if d.visible {
+                let lines=d.lines(Instant::now());
+                let box_height=18.0+lines.len() as f32*12.0;
+                host.fill(event.batch,[8.0,8.0,width.min(510.0)-16.0,box_height],0xe4182031);
+                for (i,line) in lines.iter().enumerate() {
+                    host.text(event.batch,line,[16.0,17.0+i as f32*12.0],
+                        if i==0 {0xffaeebba}else{0xffd8e2ef},true);
+                }
+            }
         }
     }
 
     fn client_disconnecting(&self, _host: &dyn Host, _event: &mut ClientDisconnectingEvent) {
-        if let Ok(mut camera) = self.camera.lock() {camera.reset();}
+        if let Ok(mut diag)=self.diagnostics.lock(){diag.disconnect();}
+        if let Ok(mut c) = self.camera.lock() { c.reset(); }
+        if let Ok(mut c) = self.cinematic.lock() { c.reset(); }
+        if let Ok(mut c) = self.controls.lock() { c.reset(); }
+        if let Ok(mut f) = self.feedback.lock() { f.reset(); }
+        if let Ok(mut z) = self.zoom.lock() { *z = 1.0; }
     }
 }
 

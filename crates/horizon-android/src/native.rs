@@ -3,11 +3,23 @@ use jni::{JavaVM, objects::{JObject, JString, JValue}};
 use serde::Deserialize;
 use std::{path::{Path, PathBuf}, sync::OnceLock};
 use winit::platform::android::activity::AndroidApp;
+#[cfg(feature = "vis-vsclient")]
+#[path = "../../../integrations/vsclient-horizon/api/src/lib.rs"]
+mod vis_vsclient;
+#[cfg(feature = "vis-vsclient")]
+#[path = "../../../integrations/vsclient-horizon/activation.rs"]
+mod vis_autoload;
 static HOME: OnceLock<PathBuf> = OnceLock::new();
 const COMMIT: &str = env!("VIS_ENGINE_COMMIT");
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Launch { schema:u8, owner:String, instance:String, name:String, server:String, engine_commit:String }
+struct Launch {
+    schema:u8, owner:String, instance:String, name:String, server:String, engine_commit:String,
+    // The launcher checks the selected instance's VSClient .hnmod and forwards
+    // only the activation bit. Android apps cannot read another app's private
+    // files, so no arbitrary native source crosses an app boundary.
+    #[serde(default)] vsclient:bool,
+}
 fn launch(app: &AndroidApp) -> Option<Launch> {
     // AndroidApp owns the Activity and VM for the lifetime of android_main.
     let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
@@ -52,11 +64,22 @@ fn android_main(app:AndroidApp){
     })();
     if let Err(error)=copy {log::error!("Engine resources: {error}");return;}
     let resources=home.join(".local/horizon-client").join(horizon_core::VANILLA_VERSION);
+    let requested_vsclient=request.vsclient;
     let mut args=vec!["--resources".into(),resources.to_string_lossy().into_owned(),"--game-dir".into(),game.to_string_lossy().into_owned(),"--home".into(),home.to_string_lossy().into_owned(),"--name".into(),request.name,"--fullscreen".into(),"--render-distance".into(),"6".into()];
     if !request.server.is_empty(){args.extend(["--server".into(),request.server]);}
     let _=HOME.set(home);
     horizon_client::android::initialize(app,args,prepare);
     horizon_official::register();
+    #[cfg(feature = "vis-vsclient")]
+    if requested_vsclient || vis_autoload::wants_vsclient_in(&game) {
+        horizon_client::mod_api::name_mods(&["vsclient"]);
+        let mods: horizon_client::mod_api::Mods =
+            std::sync::Arc::from(vec![vis_vsclient::hooks()]);
+        log::info!("Native VSClient {} enabled for current McRust Android instance",
+            vis_autoload::VERSION);
+        horizon_client::entry::main_with(mods);
+        std::process::exit(0);
+    }
     horizon_client::entry::main();
     // Winit owns one loop per process. Saving/shutdown completed before returning.
     std::process::exit(0);

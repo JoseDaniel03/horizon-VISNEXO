@@ -2158,3 +2158,45 @@ fn combined_content_is_snapshotted_with_its_exact_native_build() {
         "disabled mods leave no content in the next build"
     );
 }
+
+#[test]
+fn native_archive_file_is_discovered_as_trait_mod_without_unzipping() {
+    use std::io::Write;
+
+    let scratch = dir("direct-native-hnmod");
+    let path = scratch.join("VSClient-MCRust-0.4.1.hnmod");
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
+    let pin = "a".repeat(40);
+    let meta = serde_json::json!({
+        "schema":1, "id":"vsclient", "version":"0.4.1",
+        "game":"26.3", "horizon":pin, "mixins":"b".repeat(40)
+    });
+    zip.start_file("horizon-native.json", opts).unwrap();
+    zip.write_all(meta.to_string().as_bytes()).unwrap();
+    zip.start_file("mixins/vsclient/horizon-mixin.toml", opts).unwrap();
+    zip.write_all(format!(
+        "[mod]\nid='vsclient'\nversion='0.4.1'\n[api]\npath='api'\n[compatibility]\nhorizon_revision='{}'\n",pin
+    ).as_bytes()).unwrap();
+    zip.start_file("mixins/vsclient/api/Cargo.toml", opts).unwrap();
+    zip.write_all(b"[package]\nname='vsclient'\nversion='0.4.1'\nedition='2024'\n").unwrap();
+    zip.start_file("mixins/vsclient/api/src/lib.rs", opts).unwrap();
+    zip.write_all(b"pub fn hooks() {}").unwrap();
+    fs::write(&path, zip.finish().unwrap().into_inner()).unwrap();
+
+    let found=bundles(&path).expect("The real native-build path must accept a .hnmod file");
+    assert_eq!(found.len(),1);
+    assert_eq!(found[0].id,"vsclient");
+    assert_eq!(found[0].version,"0.4.1");
+    assert_eq!(found[0].horizon.as_deref(),Some(pin.as_str()));
+    assert_eq!(found[0].api.as_deref(),Some("api"));
+    assert_eq!(found[0].hooks,None);
+    assert!(found[0].dir.join("api/src/lib.rs").is_file());
+
+    let outer=scratch.join("VSClient-MCRust-0.4.1-artifact.zip");
+    fs::copy(&path,&outer).unwrap();
+    assert!(bundles(&outer).unwrap_err().contains("unzip the outer artifact ZIP"));
+    let extracted=found[0].dir.parent().and_then(Path::parent).unwrap().to_owned();
+    let _=fs::remove_dir_all(extracted);
+    let _=fs::remove_dir_all(scratch);
+}

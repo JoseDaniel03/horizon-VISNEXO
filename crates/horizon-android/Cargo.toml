@@ -8,6 +8,8 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 [dependencies]
 horizon-client = { path = "../horizon-client", default-features = false, features = ["horizon-extras"] }
+# Bundle reader never executes files; VSClient Rust is compiled into the APK.
+horizon-mods = { path = "../horizon-mods", features = ["index"], optional = true }
 horizon-core = { path = "../horizon-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -20,6 +22,7 @@ log = "0.4"
 [features]
 default = ["audio"]
 audio = ["horizon-client/audio"]
+vis-vsclient = ["dep:horizon-mods", "horizon-official/vis-vsclient"]
 [target.'cfg(target_os = "android")'.dependencies]
 horizon-official = { path = "../horizon-official" }
 winit = { version = "0.30.13", features = ["android-native-activity"] }

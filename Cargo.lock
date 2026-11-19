@@ -1437,6 +1437,7 @@ dependencies = [
  "android_logger",
  "horizon-client",
  "horizon-core",
+ "horizon-mods",
  "horizon-official",
  "jni 0.21.1",
  "log",
@@ -1873,10 +1874,12 @@ dependencies = [
 name = "horizon-official"
 version = "0.1.0"
 dependencies = [
+ "horizon-client",
  "horizon-discord",
  "horizon-friends",
  "horizon-game",
  "horizon-heartbeat",
+ "horizon-mods",
  "horizon-official-servers",
  "horizon-platform",
  "log",

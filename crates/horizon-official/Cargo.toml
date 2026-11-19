@@ -10,7 +10,14 @@ description = "The official game executable: the platform's game with Horizon's 
 name = "horizon-official"
 path = "src/main.rs"
 
+[features]
+vis-vsclient = ["dep:horizon-client", "dep:horizon-mods"]
+
 [dependencies]
+# VIS-only native trait mod is already compiled into the game; players never
+# link or execute Rust code from an unreviewed .hnmod at run time.
+horizon-client = { path = "../horizon-client", default-features = false, optional = true }
+horizon-mods = { path = "../horizon-mods", features = ["index"], optional = true }
 horizon-platform = { path = "../horizon-platform" }
 horizon-heartbeat = { path = "../horizon-heartbeat" }
 horizon-friends = { path = "../horizon-friends", features = ["game"] }
