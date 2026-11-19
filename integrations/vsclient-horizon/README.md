@@ -154,3 +154,13 @@ Alternativamente, copiá el archivo **renombrado a `vsclient.hnmod`** en `<carpe
 La versión 0.4.1 resuelve rutas de detección e instalación; **no agrega las capacidades gráficas pendientes** (composición multicámara, BBModel, filtros GPU) y todavía no se verificó con el juego abierto en un dispositivo real.
 
 **Importante para el fork:** cuando la instancia arranca de un Horizon oficial, el SHA del VSClient se considera otra revisión. El launcher muestra su advertencia de incompatibilidad y exige la aceptación explícita `--allow-version-mismatch`; el motor resultante se construye sobre el código de nuestro fork. No activar `--ignore-pins`: perdería las APIs específicas de VSClient. Si el paquete no aparece en la lista tras copiarlo, comprobar que `horizon-mods.txt` contenga exactamente `mod.vsclient:true` o usar `INSTALAR_VSCLIENT.py` desde el artifact corregido.
+
+## Modo automático para VIS Nexo (opción recomendada)
+
+En las compilaciones VIS del **juego oficial de Horizon** se incluye VSClient 0.4.1 con el feature de Cargo `horizon-official/vis-vsclient`. Ese código Rust se enlaza **una sola vez durante el build del motor**, antes de distribuirlo. El archivo `.hnmod` de la instancia **no contiene código que se ejecute al iniciarla**: únicamente identifica la versión y activa el código ya incluido. No requiere Rust, Python, el Horizon Launcher separado ni el comando `native-build` en la computadora del jugador.
+
+**Uso desde VIS Nexo actualizado:** copiá el archivo extraído `VSClient-MCRust-0.4.1.hnmod` a la **raíz de la instancia Horizon** o a su carpeta `mods/`, y pulsá **Jugar**. VIS Nexo valida el archivo, lo registra bajo `horizon-native-mods/vsclient.hnmod` y activa `mod.vsclient:true`. El juego oficial reconoce el paquete y vincula los hooks precompilados durante el arranque. En otra instancia sin el archivo, VSClient queda inactivo. No se tocan los perfiles ni los mundos.
+
+**Requisito:** el motor debe tener `vsclient_embedded: "0.4.1"` en su manifiesto verificado `vis-horizon-source.json`; una versión vieja de McRust no puede aceptar mods Rust por simple copia. VIS Nexo muestra una advertencia de actualización en ese caso, en lugar de iniciar silenciosamente sin VSClient. Los instaladores de Android necesitan una versión ARM64 con esta integración compilada en la APK; **no** basta con copiar `.hnmod` en Android.
+
+El modo manual `native-build` sigue siendo útil para desarrolladores que quieran usar código fuente de otros mods nativos. El modo automático solamente activa la implementación de VSClient que fue compilada y auditada con el propio juego, sin ejecutar arbitrariamente los archivos entregados por usuarios.
