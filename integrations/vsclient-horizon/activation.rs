@@ -7,12 +7,18 @@ pub const VERSION:&str="0.4.1";
 
 fn home(args:impl IntoIterator<Item=OsString>)->Option<PathBuf>{
     let mut args=args.into_iter();
+    let mut game_dir=None;
+    let mut fallback_home=None;
     while let Some(arg)=args.next(){
-        if arg=="--game-dir" || arg=="--home" {
-            return args.next().map(PathBuf::from).filter(|p|p.is_dir());
+        // A shared launcher home can contain many instances; the selected
+        // game directory must always take precedence regardless of CLI order.
+        if arg=="--game-dir" {
+            game_dir=args.next().map(PathBuf::from).filter(|p|p.is_dir());
+        } else if arg=="--home" {
+            fallback_home=args.next().map(PathBuf::from).filter(|p|p.is_dir());
         }
     }
-    None
+    game_dir.or(fallback_home)
 }
 pub fn wants_vsclient()->bool{
     let Some(dir)=home(std::env::args_os()) else{return false};
@@ -55,7 +61,19 @@ mod tests {
             OsString::from("assets"),OsString::from("--game-dir"),
             temp.clone().into_os_string()
         ];
-        assert_eq!(home(args),Some(temp));
+        assert_eq!(home(args),Some(temp.clone()));
         assert_eq!(home([OsString::from("--game-dir")]),None);
+        let other=std::env::current_dir().unwrap();
+        let args=vec![
+            OsString::from("horizon-official"),
+            OsString::from("--home"),other.clone().into_os_string(),
+            OsString::from("--game-dir"),temp.clone().into_os_string(),
+        ];
+        assert_eq!(home(args),Some(temp.clone()));
+        let args=vec![
+            OsString::from("--game-dir"),temp.clone().into_os_string(),
+            OsString::from("--home"),other.into_os_string(),
+        ];
+        assert_eq!(home(args),Some(temp));
     }
 }
