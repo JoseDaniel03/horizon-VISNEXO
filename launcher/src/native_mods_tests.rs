@@ -2196,6 +2196,7 @@ fn native_archive_file_is_discovered_as_trait_mod_without_unzipping() {
     let outer=scratch.join("VSClient-MCRust-0.4.1-artifact.zip");
     fs::copy(&path,&outer).unwrap();
     assert!(bundles(&outer).unwrap_err().contains("unzip the outer artifact ZIP"));
+    let extracted=found[0].dir.parent().and_then(Path::parent).unwrap().to_owned();
+    let _=fs::remove_dir_all(extracted);
     let _=fs::remove_dir_all(scratch);
-    let _=fs::remove_dir_all(root().join("file-import"));
 }
