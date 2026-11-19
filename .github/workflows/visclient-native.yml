@@ -94,6 +94,18 @@ jobs:
         run: |
           cargo check --locked -p horizon-client --test vsclient_native_port --no-default-features
 
+  embedded-client:
+    name: VSClient prelinked gameplay client
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Typecheck complete Horizon client with built-in VSClient feature
+        run: |
+          cargo check --locked -p horizon-client --bin horizon-client --features vis-vsclient
+          cargo check --locked -p horizon-client --bin horizon-client --no-default-features --features vis-vsclient
+
   native-loader:
     name: Native mod recognition and install
     runs-on: ubuntu-22.04
