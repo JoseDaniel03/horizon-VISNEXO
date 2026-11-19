@@ -248,7 +248,11 @@ impl Hooks for VsClientHorizon {
             CHANNEL_PROFILE => {
                 let actions = self.controls.lock().ok()
                     .and_then(|mut c| c.apply_profile(text).ok());
+                let accepted=actions.is_some();
                 if let Some(actions) = actions { send_actions(host,actions,&self.diagnostics); }
+                // Required for F7 diagnostics to show the actual Bridge
+                // handshake. Failed profiles must count as rejected.
+                self.record(PacketKind::Profile,accepted);
             }
             "virgoland:controls" => {
                 let accepted=text=="8|open" && host.mod_screen_open(ui::ID);
