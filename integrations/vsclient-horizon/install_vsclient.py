@@ -67,6 +67,9 @@ def install(instance: Path, mod: Path, replace: bool = False, dry_run: bool = Fa
     installed = target_dir / "vsclient.hnmod"
     if target_dir.is_symlink() or installed.is_symlink():
         raise ValueError("Refusing symbolic links in the instance native mod folder")
+    prefs = instance / "horizon-mods.txt"
+    if prefs.is_symlink():
+        raise ValueError("Refusing a symbolic-link mod settings file")
     if installed.exists() and not replace:
         raise FileExistsError(f"{installed} already exists; use --replace to upgrade")
     if dry_run:
@@ -85,9 +88,6 @@ def install(instance: Path, mod: Path, replace: bool = False, dry_run: bool = Fa
             os.unlink(filename)
     # Horizon's installed_mods_into intentionally ignores a copied .hnmod
     # unless "mod.vsclient:true" is enabled in horizon-mods.txt.
-    prefs = instance / "horizon-mods.txt"
-    if prefs.is_symlink():
-        raise ValueError("Refusing a symbolic-link mod settings file")
     lines = prefs.read_text(encoding="utf-8").splitlines() if prefs.exists() else []
     lines = [line for line in lines
              if line.partition(":")[0].strip() != "mod.vsclient"]
