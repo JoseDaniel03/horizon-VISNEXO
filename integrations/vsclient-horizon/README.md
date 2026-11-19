@@ -136,3 +136,19 @@ La recarga de brazos `vsrender:reload_arms` y los impulsos `vsrender:action_effe
 Se interpretan ahora los paquetes `vsrender:weapon_feedback` con los límites de Fabric (`actor`, recoil, recuperación, luz 0–15 y flash máximo de seis ticks). Durante el flash se dibuja una pequeña geometría traslúcida y temporal frente a la posición de la entidad recibida en Horizon. El efecto no modifica la iluminación física del mundo, la lógica de daño ni el inventario. Las animaciones esqueléticas de recarga de otras entidades y la generación del modelo BBModel requieren una capa 3D nativa adicional.
 
 **Limitaciones importantes:** la conexión real a Virgoland, los permisos y autenticación de Microsoft, GPU multivista, skins y renderizado de modelos, gamepad analógico, Android multitáctil y QA del Motorola no están validados. Los informes F6 no contienen tickets ni direcciones; el código actual tampoco verifica que un ticket de VIS Nexo esté vinculado al host: el proceso que lo inyecta debe garantizarlo.
+
+## Corrección 0.4.1: paquete reconocido por Horizon
+
+**El artifact de GitHub Actions es un ZIP contenedor, no el archivo nativo.** Abrí el ZIP y extraé **`VSClient-MCRust-0.4.1.hnmod`**. No pegues el ZIP de Actions ni el `.tar.gz` en la carpeta de mods de Java.
+
+El formato nativo se verifica con el parser `horizon_mods::index::native::Bundle::read`, pero **eso no lo instala ni compila**. El fork de Horizon ahora acepta un fichero `.hnmod` directamente al invocar `native-build`, y cuando su manifiesto pincha un SHA exclusivo de `JoseDaniel03/horizon-VISNEXO` descarga el código de dicho fork, en lugar de fallar buscando el commit en el proyecto upstream. El paquete deja de declarar compatibilidad genérica de `hooks` porque VSClient requiere APIs específicas de CustomPayload del fork.
+
+En una instancia de Horizon compatible, usá:
+
+```bash
+horizon-launcher native-build /ruta/VSClient-MCRust-0.4.1.hnmod --instance "Nombre de instancia" --trust-native-code
+```
+
+Alternativamente, copiá el archivo **renombrado a `vsclient.hnmod`** en `<carpeta-de-la-instancia>/horizon-native-mods/`, activalo en el administrador de mods de esa instancia y elegí **Native build / Build**. Debe verse como un mod nativo, **no como un mod Fabric en `mods/`**. La compilación produce una nueva versión propia de Horizon dentro de esa instancia. El cliente de Horizon oficial que no incluya los cambios de nuestro fork **no es compatible**. En Android, esta distribución `.hnmod` tampoco se carga automáticamente como una APK; hace falta integración y compilación nativa para la arquitectura ARM64.
+
+La versión 0.4.1 resuelve rutas de detección e instalación; **no agrega las capacidades gráficas pendientes** (composición multicámara, BBModel, filtros GPU) y todavía no se verificó con el juego abierto en un dispositivo real.
