@@ -49,7 +49,7 @@ def binary(name: str) -> str:
     return name + (".exe" if os.name == "nt" else "")
 
 
-def stage_game(source: Path, commit: str, destination: Path) -> Path:
+def stage_game(source: Path, commit: str, destination: Path, vsclient: bool = False) -> Path:
     if len(commit) != 40 or any(c not in "0123456789abcdef" for c in commit.lower()):
         raise ValueError("Full 40-digit source commit is required")
     if destination.exists():
@@ -90,6 +90,7 @@ def stage_game(source: Path, commit: str, destination: Path) -> Path:
         "source_commit": commit, "source_ref": "main",
         "platform": platform_id(), "sha256": hashes,
         "minecraft_assets_included": False,
+        "vsclient_embedded": "0.4.1" if vsclient else None,
         "note": "Horizon Rust game only; player obtains Mojang files separately."
     }
     (destination / "vis-horizon-source.json").write_text(
@@ -127,10 +128,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--commit", required=True, help="Exact checked-out git commit")
     parser.add_argument("--dist", default="dist/vis-game")
+    parser.add_argument("--with-vsclient", action="store_true",
+                        help="Game binary was built with horizon-official/vis-vsclient")
     args = parser.parse_args()
     dist = (ROOT / args.dist).resolve()
     with tempfile.TemporaryDirectory(prefix="vis-horizon-package-") as tmp:
-        stage = stage_game(ROOT, args.commit.lower(), Path(tmp) / "vis-horizon")
+        stage = stage_game(ROOT, args.commit.lower(), Path(tmp) / "vis-horizon", args.with_vsclient)
         make_archive(stage, dist)
 
 
