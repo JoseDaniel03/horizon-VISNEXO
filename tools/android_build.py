@@ -143,7 +143,9 @@ def main():
     compiler_target = 'armv7a-linux-androideabi' if args.abi == 'armeabi-v7a' else target
     legacy = args.abi in ('armeabi-v7a', 'x86')
     min_sdk = 27 if legacy else 28
-    features = ['--no-default-features', '--features', 'audio']
+    # VIS distributes McRust with the reviewed VSClient module prelinked.
+    # An instance .hnmod file enables it; absent the marker nothing runs.
+    features = ['--no-default-features', '--features', 'audio,vis-vsclient']
     manifests = [(['-p', 'horizon-android'], features)]
     environment = dict(os.environ)
     environment['PATH'] = os.pathsep.join([str(ndk / 'bin'), str(args.java_home / 'bin'), environment['PATH']])
