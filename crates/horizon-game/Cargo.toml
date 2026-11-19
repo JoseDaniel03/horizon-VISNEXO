@@ -6,8 +6,17 @@ license.workspace = true
 rust-version.workspace = true
 description = "The game as the platform runs it: the engine's entry with the platform's parts registered, for an executable to start (docs/layers.md)"
 
+[features]
+# Desktop keeps the existing native client defaults; Android opts in to
+# the platform facade without desktop controllers.
+default = ["client-defaults"]
+client-defaults = ["horizon-client/default"]
+android = ["horizon-client/horizon-extras"]
+audio = ["horizon-client/audio"]
+
 [dependencies]
-horizon-client = { path = "../horizon-client" }
+horizon-client = { path = "../horizon-client", default-features = false }
+horizon-core = { path = "../horizon-core" }
 horizon-threads = { path = "../horizon-threads" }
 horizon-mods = { path = "../horizon-mods", default-features = false, features = ["index"] }
 
