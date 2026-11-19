@@ -8,17 +8,21 @@ pub const VERSION:&str="0.4.1";
 fn home(args:impl IntoIterator<Item=OsString>)->Option<PathBuf>{
     let mut args=args.into_iter();
     let mut game_dir=None;
+    let mut saw_game_dir=false;
     let mut fallback_home=None;
     while let Some(arg)=args.next(){
         // A shared launcher home can contain many instances; the selected
         // game directory must always take precedence regardless of CLI order.
         if arg=="--game-dir" {
+            saw_game_dir=true;
             game_dir=args.next().map(PathBuf::from).filter(|p|p.is_dir());
         } else if arg=="--home" {
             fallback_home=args.next().map(PathBuf::from).filter(|p|p.is_dir());
         }
     }
-    game_dir.or(fallback_home)
+    // Do not fall back to the shared launcher home if the requested
+    // instance path is missing: that could enable a different profile's mod.
+    if saw_game_dir { game_dir } else { fallback_home }
 }
 pub fn wants_vsclient()->bool{
     let Some(dir)=home(std::env::args_os()) else{return false};
@@ -75,5 +79,10 @@ mod tests {
             OsString::from("--home"),other.into_os_string(),
         ];
         assert_eq!(home(args),Some(temp));
+        assert_eq!(home([
+            OsString::from("--home"),std::env::temp_dir().into_os_string(),
+            OsString::from("--game-dir"),
+            std::env::temp_dir().join("unavailable-vsclient-instance").into_os_string()
+        ]),None);
     }
 }
