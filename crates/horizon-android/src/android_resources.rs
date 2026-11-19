@@ -181,7 +181,7 @@ pub fn controls_with_progress(root: &Path, progress: impl Fn(u64, u64)) -> Resul
             )
         };
         let url =
-            format!("https://raw.githubusercontent.com/Mojang/bedrock-samples/{revision}/{source}");
+            format!("{}/{revision}/{source}", horizon_addresses::BEDROCK_SAMPLES_RAW);
         let mut bytes = Vec::new();
         agent
             .get(&url)
