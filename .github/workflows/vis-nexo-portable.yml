@@ -13,6 +13,7 @@ on:
       - 'Cargo.lock'
       - 'rust-toolchain*'
       - 'crates/**'
+      - 'integrations/vsclient-horizon/**'
       - 'game/**'
       - 'mods/horizon/**'
       - 'third_party/**'
@@ -36,6 +37,7 @@ on:
       - 'Cargo.lock'
       - 'rust-toolchain*'
       - 'crates/**'
+      - 'integrations/vsclient-horizon/**'
       - 'game/**'
       - 'mods/horizon/**'
       - 'third_party/**'
@@ -95,7 +97,7 @@ jobs:
         run: |
           # The playable game is horizon-official. The low-level
           # horizon-client crate alone is not the public release game.
-          cargo build --locked --release -p horizon-official --bin horizon-official -p horizon-prepare --bin horizon-prepare
+          cargo build --locked --release -p horizon-official --bin horizon-official -p horizon-prepare --bin horizon-prepare --features horizon-official/vis-vsclient
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             cp target/release/horizon-official.exe target/release/horizon-client.exe
           else
@@ -114,7 +116,7 @@ jobs:
           python3 -c "import json; c=json.load(open('client-api.json'));p=json.load(open('preparer-api.json')); assert c.get('minecraft')==p.get('minecraft')=='26.3'; assert c.get('launch_api')==p.get('launch_api');print('Horizon Launch API verified:',c['launch_api'])"
       - name: Package portable game for VIS Nexo
         shell: bash
-        run: python3 tools/vis_nexo_portable.py --commit "${{ github.sha }}"
+        run: python3 tools/vis_nexo_portable.py --commit "${{ github.sha }}" --with-vsclient
       - name: Validate portable archive contents and binary fingerprints
         shell: bash
         run: |
