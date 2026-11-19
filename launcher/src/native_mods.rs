@@ -1085,7 +1085,15 @@ fn remembered(
 
 fn ask_github(repo: &str, revision: &str) -> Result<String, String> {
     let url = format!("https://api.github.com/repos/{repo}/commits/{revision}");
-    let commit = crate::github::json(&url)?;
+    let commit = crate::github::json(&url).or_else(|upstream_error| {
+        if repo != backend::REPO || !is_revision(revision) {
+            return Err(upstream_error);
+        }
+        let fork_url = format!(
+            "https://api.github.com/repos/JoseDaniel03/horizon-VISNEXO/commits/{revision}"
+        );
+        crate::github::json(&fork_url)
+    })?;
     commit["commit"]["committer"]["date"]
         .as_str()
         .map(str::to_owned)
@@ -1124,14 +1132,26 @@ fn hooks_in(source: &str) -> Option<u32> {
     line.trim_end().strip_suffix(';')?.parse().ok()
 }
 
-/// The native hook points' version of Horizon at `revision`, from GitHub (None: it has none).
+/// A specific native hook file at an exact pinned revision. The VIS fork
+/// carries client payload hook types not available in every upstream build.
+fn pinned_source_text(revision: &str, file: &str) -> Option<String> {
+    if !is_revision(revision) { return None; }
+    for repository in [backend::REPO, "JoseDaniel03/horizon-VISNEXO"] {
+        let url = format!(
+            "https://raw.githubusercontent.com/{repository}/{revision}/{file}"
+        );
+        if let Ok(body) = backend::get(&url) {
+            if let Ok(text) = body.into_string() {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+/// The native hook points' version of Horizon at `revision`, from GitHub.
 pub(crate) fn hooks_at(revision: &str) -> Option<u32> {
-    let url = format!(
-        "https://raw.githubusercontent.com/{}/{revision}/{HOOKS_FILE}",
-        backend::REPO
-    );
-    let text = backend::get(&url).ok()?.into_string().ok()?;
-    hooks_in(&text)
+    hooks_in(&pinned_source_text(revision, HOOKS_FILE)?)
 }
 
 /// The named hook points (name, version) a `native-hooks.json` lists; None when it isn't one.
@@ -1150,12 +1170,7 @@ fn catalog_in(text: &str) -> Option<HookCatalog> {
 /// The named hook points of Horizon at `revision`, from GitHub (None: it has no catalog, as
 /// revisions from before d3e0774 that already had hook points v2).
 fn catalog_at(revision: &str) -> Option<HookCatalog> {
-    let url = format!(
-        "https://raw.githubusercontent.com/{}/{revision}/{CATALOG}",
-        backend::REPO
-    );
-    let text = backend::get(&url).ok()?.into_string().ok()?;
-    catalog_in(&text)
+    catalog_in(&pinned_source_text(revision, CATALOG)?)
 }
 
 /// Where Horizon lists its named hook points, at the workspace root (horizon-mixins reads it there).
