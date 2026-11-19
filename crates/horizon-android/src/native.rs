@@ -3,6 +3,12 @@ use jni::{JavaVM, objects::{JObject, JString, JValue}};
 use serde::Deserialize;
 use std::{path::{Path, PathBuf}, sync::OnceLock};
 use winit::platform::android::activity::AndroidApp;
+#[cfg(feature = "vis-vsclient")]
+#[path = "../../../integrations/vsclient-horizon/api/src/lib.rs"]
+mod vis_vsclient;
+#[cfg(feature = "vis-vsclient")]
+#[path = "../../../integrations/vsclient-horizon/activation.rs"]
+mod vis_autoload;
 static HOME: OnceLock<PathBuf> = OnceLock::new();
 const COMMIT: &str = env!("VIS_ENGINE_COMMIT");
 #[derive(Deserialize)]
@@ -57,6 +63,16 @@ fn android_main(app:AndroidApp){
     let _=HOME.set(home);
     horizon_client::android::initialize(app,args,prepare);
     horizon_official::register();
+    #[cfg(feature = "vis-vsclient")]
+    if vis_autoload::wants_vsclient_in(&game) {
+        horizon_client::mod_api::name_mods(&["vsclient"]);
+        let mods: horizon_client::mod_api::Mods =
+            std::sync::Arc::from(vec![vis_vsclient::hooks()]);
+        log::info!("Native VSClient {} enabled for current McRust Android instance",
+            vis_autoload::VERSION);
+        horizon_client::entry::main_with(mods);
+        std::process::exit(0);
+    }
     horizon_client::entry::main();
     // Winit owns one loop per process. Saving/shutdown completed before returning.
     std::process::exit(0);
