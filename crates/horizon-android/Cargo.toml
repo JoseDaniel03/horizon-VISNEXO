@@ -7,10 +7,11 @@ rust-version.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 [dependencies]
-horizon-client = { path = "../horizon-client", default-features = false, features = ["horizon-extras"] }
+# The Android host is Horizon's product layer; it uses the platform facade,
+# not direct engine crates, for native game startup and resource versions.
+horizon-game = { path = "../horizon-game", default-features = false, features = ["android"] }
 # Bundle reader never executes files; VSClient Rust is compiled into the APK.
 horizon-mods = { path = "../horizon-mods", features = ["index"], optional = true }
-horizon-core = { path = "../horizon-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
@@ -21,7 +22,7 @@ url = "2"
 log = "0.4"
 [features]
 default = ["audio"]
-audio = ["horizon-client/audio"]
+audio = ["horizon-game/audio"]
 vis-vsclient = ["dep:horizon-mods", "horizon-official/vis-vsclient"]
 [target.'cfg(target_os = "android")'.dependencies]
 horizon-official = { path = "../horizon-official" }
