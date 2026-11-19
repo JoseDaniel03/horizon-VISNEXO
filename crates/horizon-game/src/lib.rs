@@ -28,6 +28,17 @@ pub use horizon_threads::{ALLOCATOR, Allocator};
 /// `main` reads, so the linker keeps it.
 pub const MOD_API_LEVEL: [u8; horizon_mods::api_level::MARK.len()] = horizon_mods::api_level::MARK;
 
+/// Platform's public mod-registration interface; official hosts use this
+/// instead of importing the engine directly.
+pub use horizon_client::mod_api;
+
+/// Android's Activity entry registers its winit callback through the platform.
+#[cfg(target_os = "android")]
+pub use horizon_client::android;
+
+/// Same vanilla version for game resource installers on every host platform.
+pub const VANILLA_VERSION: &str = horizon_core::VANILLA_VERSION;
+
 /// Runs the game with the hooks registered so far, and returns when it ends. Register hooks
 /// (`horizon_platform::hooks::register`) before calling it.
 pub fn main() {
