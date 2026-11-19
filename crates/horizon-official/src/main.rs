@@ -20,8 +20,8 @@ fn main() {
     horizon_official::register();
     #[cfg(feature = "vis-vsclient")]
     if vis_autoload::wants_vsclient() {
-        horizon_client::mod_api::name_mods(&["vsclient"]);
-        let mods: horizon_client::mod_api::Mods =
+        horizon_game::mod_api::name_mods(&["vsclient"]);
+        let mods: horizon_game::mod_api::Mods =
             std::sync::Arc::from(vec![vis_vsclient::hooks()]);
         horizon_game::main_with(mods);
         return;
