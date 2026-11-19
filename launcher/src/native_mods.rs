@@ -1931,7 +1931,26 @@ fn source(revision: &str) -> Result<PathBuf, String> {
         backend::REPO
     );
     let partial = root().join("source").join(format!(".{revision}.partial"));
-    let top = unpack_archive(&archive, &partial, u64::MAX)?;
+    // VIS MCRust ships its own Horizon fork. VSClient's native packet API
+    // exists in fork commits that are not present in upstream Horizon.
+    // Resolve the exact pinned commit from upstream first (unchanged
+    // behaviour for regular mods), then from our fixed, trusted fork.
+    // Never use a branch or "latest": the requested 40-digit SHA is identical
+    // for both archives and the cache is keyed by that SHA.
+    const VIS_FORK: &str = "JoseDaniel03/horizon-VISNEXO";
+    let top = match unpack_archive(&archive, &partial, u64::MAX) {
+        Ok(source) => source,
+        Err(upstream_error) => {
+            let from_fork = format!(
+                "https://codeload.github.com/{VIS_FORK}/tar.gz/{revision}"
+            );
+            unpack_archive(&from_fork, &partial, u64::MAX).map_err(|fork_error| {
+                format!(
+                    "Cannot download pinned Horizon {revision} from upstream or the VIS fork.                     Upstream: {upstream_error}; VIS fork: {fork_error}"
+                )
+            })?
+        }
+    };
     fs::write(top.join(".horizon-revision"), revision).map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&dir);
     fs::rename(&top, &dir).map_err(|e| e.to_string())?;
