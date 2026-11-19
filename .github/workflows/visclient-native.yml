@@ -105,21 +105,24 @@ jobs:
           mkdir -p dist
           python3 integrations/vsclient-horizon/package_native.py \
             --horizon "$HORIZON_SHA" \
-            --out dist/VSClient-MCRust-0.4.0.hnmod
-          sha256sum dist/VSClient-MCRust-0.4.0.hnmod | tee dist/SHA256SUMS.txt
+            --out dist/VSClient-MCRust-0.4.1.hnmod
+          sha256sum dist/VSClient-MCRust-0.4.1.hnmod | tee dist/SHA256SUMS.txt
           cat > dist/INSTALAR.txt <<'EOF'
-          VSCLIENT MCRUST 0.4.0 - MOD NATIVO HORIZON
+          VSCLIENT MCRUST 0.4.1 - MOD NATIVO HORIZON
           ============================================
-          Archivo: VSClient-MCRust-0.4.0.hnmod
+          Archivo: VSClient-MCRust-0.4.1.hnmod
           No es un .jar de Fabric ni una APK. Horizon compila este mod nativo
           con el cliente de Minecraft Rust en la instancia elegida.
-          Para instalarlo manualmente, descomprimí este .hnmod como ZIP a
-          una carpeta que contenga horizon-native.json y mixins/vsclient/,
-          y usá la acción "Native build" de Horizon o su comando:
-            horizon-launcher native-build CARPETA --instance INSTANCIA --trust-native-code
-          SOLO funciona con una versión del motor que incluya los hooks y los
-          CustomPayload necesarios. El launcher Horizon upstream puede descargar
-          código de horizon-rust/horizon, no el fork de VIS. Si la versión difiere,
+          Para instalarlo, extraé primero este .hnmod del ZIP descargado
+          de GitHub Actions. En el launcher del fork VIS, podés usar:
+            horizon-launcher native-build VSClient-MCRust-0.4.1.hnmod --instance INSTANCIA --trust-native-code
+          O copiá el .hnmod renombrado a vsclient.hnmod dentro de
+            INSTANCIA/horizon-native-mods/
+          y activá el mod en la lista de la instancia antes de compilarlo.
+          Requiere un launcher del fork actualizado con reconocimiento directo
+          de .hnmod y resolución de commits de JoseDaniel03/horizon-VISNEXO.
+          El launcher oficial anterior no reconocerá el fork ni la APK Android
+          aceptará por sí sola un mod nativo sin compilar. Si la versión difiere,
           no instales encima de tus mundos: usá una instancia separada.
           Funciones: cámaras V1, FOV/zoom, controles de servidor, interfaz y
           acciones táctiles, V3 experimental, efectos VSRender y diagnóstico.
@@ -136,13 +139,15 @@ jobs:
           #[test]
           fn accepts_vsclient_native_mod_manifest_and_source_files() {
               let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                  .join("../../dist/VSClient-MCRust-0.4.0.hnmod");
+                  .join("../../dist/VSClient-MCRust-0.4.1.hnmod");
               let bundle = horizon_mods::index::native::Bundle::read(&path)
                   .expect("Horizon must accept the installable .hnmod archive");
               assert_eq!(bundle.manifest.id, "vsclient");
-              assert_eq!(bundle.manifest.version, "0.4.0");
+              assert_eq!(bundle.manifest.version, "0.4.1");
               assert_eq!(bundle.manifest.game, "26.3");
-              assert_eq!(bundle.manifest.hooks, Some(415));
+              // VSClient requires the fork's CustomPayload additions, not only
+              // the numeric native hooks version shared by other revisions.
+              assert_eq!(bundle.manifest.hooks, None);
               assert_eq!(bundle.manifest.horizon, std::env::var("HORIZON_SHA").unwrap());
               assert!(bundle.files.contains_key("mixins/vsclient/api/src/lib.rs"));
               assert!(bundle.files.contains_key("mixins/vsclient/horizon-mixin.toml"));
@@ -151,9 +156,9 @@ jobs:
           cargo test --locked -p horizon-mods --features index --test vsclient_package_ci -- --nocapture
       - uses: actions/upload-artifact@v4
         with:
-          name: VSClient-MCRust-0.4.0-HNMOD
+          name: VSClient-MCRust-0.4.1-HNMOD
           path: |
-            dist/VSClient-MCRust-0.4.0.hnmod
+            dist/VSClient-MCRust-0.4.1.hnmod
             dist/SHA256SUMS.txt
             dist/INSTALAR.txt
           retention-days: 30
