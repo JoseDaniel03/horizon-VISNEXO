@@ -39,6 +39,8 @@ def validate_sha(value: str) -> None:
 def make_archive(output: Path, horizon_revision: str) -> str:
     validate_sha(horizon_revision)
     hooks = int(source_revision(HOOKS, REPO / "crates/horizon-client/src/game/native_hooks.rs"))
+    if hooks < 415:
+        raise ValueError("VSClient requires Horizon fork native hooks API 415 or later")
     mixins = source_revision(MIXINS, REPO / "launcher/src/native_mods.rs")
     validate_sha(mixins)
     mixin = ROOT / "horizon-mixin.toml"
@@ -54,6 +56,10 @@ def make_archive(output: Path, horizon_revision: str) -> str:
         raise ValueError("Horizon native API path must be api")
     if "compatibility" in mod:
         raise ValueError("Source mixin may not pin another Horizon revision")
+    # IMPORTANT: this mod also relies on fork-specific payload and mod_api
+    # changes. Advertising only "hooks" would cause Horizon to rebase it onto
+    # an unrelated upstream game revision with the same numeric hook level,
+    # which cannot actually compile/load VSClient. Always pin the exact fork.
     manifest = {
         "schema": 1,
         "id": MOD_ID,
@@ -61,7 +67,6 @@ def make_archive(output: Path, horizon_revision: str) -> str:
         "game": GAME,
         "horizon": horizon_revision,
         "mixins": mixins,
-        "hooks": hooks,
     }
     header = mixin.read_text(encoding="utf-8")
     header += f'\n[compatibility]\nhorizon_revision = "{horizon_revision}"\n'
