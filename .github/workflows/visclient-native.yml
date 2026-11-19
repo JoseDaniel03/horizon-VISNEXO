@@ -140,7 +140,7 @@ jobs:
           con el cliente de Minecraft Rust en la instancia elegida.
           Para instalarlo, extraé primero este .hnmod del ZIP descargado
           de GitHub Actions. En el launcher del fork VIS, podés usar:
-            horizon-launcher native-build VSClient-MCRust-0.4.1.hnmod --instance INSTANCIA --trust-native-code
+            horizon-launcher native-build VSClient-MCRust-0.4.1.hnmod --instance INSTANCIA --allow-version-mismatch --trust-native-code
           O copiá el .hnmod renombrado a vsclient.hnmod dentro de
             INSTANCIA/horizon-native-mods/
           y activá el mod en la lista de la instancia antes de compilarlo.
