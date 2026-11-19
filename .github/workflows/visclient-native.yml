@@ -144,6 +144,10 @@ jobs:
           O copiá el .hnmod renombrado a vsclient.hnmod dentro de
             INSTANCIA/horizon-native-mods/
           y activá el mod en la lista de la instancia antes de compilarlo.
+          OPCIÓN SIN EDITAR CARPETAS A MANO EN PC (Python 3):
+            python3 INSTALAR_VSCLIENT.py --instance CARPETA_INSTANCIA --hnmod VSClient-MCRust-0.4.1.hnmod --replace
+          El instalador activa mod.vsclient:true pero NO ejecuta ni compila
+          código nativo. La aprobación se hace en la pantalla Native build.
           Requiere un launcher del fork actualizado con reconocimiento directo
           de .hnmod y resolución de commits de JoseDaniel03/horizon-VISNEXO.
           El launcher oficial anterior no reconocerá el fork ni la APK Android
@@ -179,6 +183,22 @@ jobs:
           }
           EOF
           cargo test --locked -p horizon-mods --features index --test vsclient_package_ci -- --nocapture
+      - name: Install VSClient in isolated Horizon instance and verify recognition
+        run: |
+          cp integrations/vsclient-horizon/install_vsclient.py dist/INSTALAR_VSCLIENT.py
+          mkdir -p /tmp/vsclient-horizon-test-instance
+          python3 dist/INSTALAR_VSCLIENT.py \
+            --hnmod dist/VSClient-MCRust-0.4.1.hnmod \
+            --instance /tmp/vsclient-horizon-test-instance --check-only
+          python3 dist/INSTALAR_VSCLIENT.py \
+            --hnmod dist/VSClient-MCRust-0.4.1.hnmod \
+            --instance /tmp/vsclient-horizon-test-instance
+          test -s /tmp/vsclient-horizon-test-instance/horizon-native-mods/vsclient.hnmod
+          grep -qx 'mod.vsclient:true' /tmp/vsclient-horizon-test-instance/horizon-mods.txt
+          python3 dist/INSTALAR_VSCLIENT.py \
+            --hnmod dist/VSClient-MCRust-0.4.1.hnmod \
+            --instance /tmp/vsclient-horizon-test-instance --replace
+          grep -cx 'mod.vsclient:true' /tmp/vsclient-horizon-test-instance/horizon-mods.txt | grep -qx '1'
       - uses: actions/upload-artifact@v4
         with:
           name: VSClient-MCRust-0.4.1-HNMOD
@@ -186,5 +206,6 @@ jobs:
             dist/VSClient-MCRust-0.4.1.hnmod
             dist/SHA256SUMS.txt
             dist/INSTALAR.txt
+            dist/INSTALAR_VSCLIENT.py
           retention-days: 30
           if-no-files-found: error
