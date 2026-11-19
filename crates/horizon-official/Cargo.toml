@@ -11,12 +11,12 @@ name = "horizon-official"
 path = "src/main.rs"
 
 [features]
-vis-vsclient = ["dep:horizon-client", "dep:horizon-mods"]
+vis-vsclient = ["dep:horizon-mods"]
 
 [dependencies]
 # VIS-only native trait mod is already compiled into the game; players never
 # link or execute Rust code from an unreviewed .hnmod at run time.
-horizon-client = { path = "../horizon-client", default-features = false, optional = true }
+# The platform game exposes native mod registration without engine imports.
 horizon-mods = { path = "../horizon-mods", features = ["index"], optional = true }
 horizon-platform = { path = "../horizon-platform" }
 horizon-heartbeat = { path = "../horizon-heartbeat" }
