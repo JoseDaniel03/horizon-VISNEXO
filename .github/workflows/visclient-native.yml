@@ -184,8 +184,9 @@ jobs:
           Archivo: VSClient-MCRust-0.4.1.hnmod
 
           INSTALACIÓN AUTOMÁTICA EN VIS NEXO (PC):
-          1. Extraé el .hnmod del ZIP externo descargado de GitHub Actions.
-          2. Copiá el .hnmod a la raíz de tu instancia McRust o a mods/.
+          1. Descargá VSClient-MCRust-0.4.1-HNMOD.zip de GitHub Actions.
+          2. Copiá ese ZIP tal cual, o el .hnmod interno, a la raíz
+             de la instancia McRust o a mods/.
           3. Pulsá Jugar. VIS Nexo actualizado lo valida y activa solo.
           4. El motor VIS actualizado ya tiene VSClient compilado en Rust;
              no hace falta Python, un compilador o Native build manual.
