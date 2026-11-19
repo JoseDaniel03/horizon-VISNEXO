@@ -146,9 +146,11 @@ El formato nativo se verifica con el parser `horizon_mods::index::native::Bundle
 En una instancia de Horizon compatible, usá:
 
 ```bash
-horizon-launcher native-build /ruta/VSClient-MCRust-0.4.1.hnmod --instance "Nombre de instancia" --trust-native-code
+horizon-launcher native-build /ruta/VSClient-MCRust-0.4.1.hnmod --instance "Nombre de instancia" --allow-version-mismatch --trust-native-code
 ```
 
 Alternativamente, copiá el archivo **renombrado a `vsclient.hnmod`** en `<carpeta-de-la-instancia>/horizon-native-mods/`, activalo en el administrador de mods de esa instancia y elegí **Native build / Build**. Debe verse como un mod nativo, **no como un mod Fabric en `mods/`**. La compilación produce una nueva versión propia de Horizon dentro de esa instancia. El cliente de Horizon oficial que no incluya los cambios de nuestro fork **no es compatible**. En Android, esta distribución `.hnmod` tampoco se carga automáticamente como una APK; hace falta integración y compilación nativa para la arquitectura ARM64.
 
 La versión 0.4.1 resuelve rutas de detección e instalación; **no agrega las capacidades gráficas pendientes** (composición multicámara, BBModel, filtros GPU) y todavía no se verificó con el juego abierto en un dispositivo real.
+
+**Importante para el fork:** cuando la instancia arranca de un Horizon oficial, el SHA del VSClient se considera otra revisión. El launcher muestra su advertencia de incompatibilidad y exige la aceptación explícita `--allow-version-mismatch`; el motor resultante se construye sobre el código de nuestro fork. No activar `--ignore-pins`: perdería las APIs específicas de VSClient. Si el paquete no aparece en la lista tras copiarlo, comprobar que `horizon-mods.txt` contenga exactamente `mod.vsclient:true` o usar `INSTALAR_VSCLIENT.py` desde el artifact corregido.
