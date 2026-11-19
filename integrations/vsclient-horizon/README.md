@@ -45,23 +45,49 @@ alteran el movimiento ni la autoridad del servidor.
 El fork exporta CustomPayload desde horizon_client::mod_api, evitando
 duplicar tipos Rust del paquete horizon-protocol.
 
-## Instalación de prueba
+## Instalación por instancia con VIS Nexo (PC)
 
-1. Actualizar la instancia VIS MCRust al fork JoseDaniel03/horizon-VISNEXO
-   que incluya la API de payloads de esta rama (mínimo fa614607).
-2. Descomprimir el artifact VSClient-MCRust-native-source o copiar la carpeta
-   integrations/vsclient-horizon del repositorio.
-3. Con el CLI nativo de Horizon, ejecutar el comando equivalente a:
+El launcher actualizado ya detecta el mod antes de iniciar McRust. No es
+necesario instalar Rust ni ejecutar scripts Python para usarlo.
 
-       horizon-launcher native-build integrations/vsclient-horizon --instance INSTANCIA --trust-native-code
+1. Descargá el artifact `VSClient-MCRust-0.4.1-HNMOD.zip` desde la compilación
+   oficial del mismo fork.
+2. Poné **el ZIP exterior tal cual** o su `VSClient-MCRust-0.4.1.hnmod`
+   en la raíz de tu instancia Horizon o en `mods/`.
+3. Iniciá la instancia desde VIS Nexo. El launcher valida límites,
+   manifiestos y versión, coloca `horizon-native-mods/vsclient.hnmod`
+   y activa `mod.vsclient:true` sin sobrescribir un mod distinto.
+4. El ejecutable oficial de McRust tiene que estar compilado con
+   `horizon-official/vis-vsclient` (versión nativa 0.4.1). Si no lo está,
+   VIS Nexo solicita actualizar el motor en vez de ejecutar Rust desde ZIP.
 
-   Requiere un build nativo del juego para la instancia seleccionada. La
-   integración automática de esta acción en el flujo VIS Nexo está pendiente:
-   **copiar un JAR Fabric o una carpeta fuente a mods no basta**.
-4. Probar el protocolo 8 contra CanvasMC/Folia 26.3 y el Bridge de VSClient.
-   Reproducir una cámara, confirmar la expiración y desconexión sin efectos
-   residuales, y verificar el comportamiento del servidor con cuentas.
-5. Hacer QA de FPS, cámara y render con jugador real antes de producción.
+El contenido Rust del ZIP **nunca se carga ni se compila al iniciar**:
+solo activa los hooks del VSClient que forman parte del motor verificado.
+La activación pertenece a la instancia seleccionada, no a otras cuentas.
+
+**Android:** el motor ARM64 debe contener VSClient y VIS Nexo Android debe
+pasar su opción de activación validada en el inicio. Android no permite
+escribir en la carpeta privada de otra app. Las comprobaciones de compilación
+no sustituyen pruebas en un teléfono real.
+
+**Desarrolladores de Horizon independiente:** el CLI `native-build` sigue
+existiendo para compilar mods nativos confiables con Rust, pero no es el
+mecanismo requerido al usar VIS Nexo con el motor precompilado.
+
+## Mejoras de estabilidad del adaptador
+
+- El diagnóstico **F7** contabiliza perfiles aceptados y rechazados del
+  Bridge; el estado «Bridge activo» solo se muestra tras perfil y estado
+  válidos.
+- Los perfiles y cambios de estado con revisiones repetidas o antiguas no
+  sueltan acciones mantenidas por el teclado o la pantalla táctil.
+- El motor da prioridad a `--game-dir` frente a `--home` al buscar el
+  mod: una instancia inexistente no habilita accidentalmente el mod de
+  otra carpeta.
+- Las transiciones de estado nuevas siguen liberando las acciones retenidas
+  para evitar aceleradores, disparos o controles de vehículos atascados.
+- Sigue faltando QA gráfico real de cámaras y efectos en Windows,
+  Linux y Android; tampoco se anuncian vistas GPU ni BBModel completos.
 
 ## Autenticación opcional del Bridge
 
