@@ -279,7 +279,6 @@ fn android_main(app: AndroidApp) {
     crate::health::initialize(app.clone());
     horizon_game::android::health::initialize(crate::health::sample);
     horizon_game::android::initialize(app, args, prepare);
-    horizon_official::register();
     horizon_game::main();
     // Winit owns one loop per process. Saving/shutdown completed before returning.
     std::process::exit(0);

@@ -10,6 +10,5 @@ static MOD_API_LEVEL: [u8; horizon_game::MOD_API_LEVEL.len()] = horizon_game::MO
 
 fn main() {
     std::hint::black_box(&MOD_API_LEVEL);
-    horizon_official::register();
     horizon_game::main();
 }

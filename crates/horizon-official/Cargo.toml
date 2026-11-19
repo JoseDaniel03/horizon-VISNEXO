@@ -27,4 +27,4 @@ workspace = true
 
 # The Android NativeActivity calls the shared engine directly after register().
 [target.'cfg(not(target_os = "android"))'.dependencies]
-horizon-game = { path = "../horizon-game" }
+horizon-game = { path = "../horizon-game", default-features = false, features = ["audio", "controllers"] }
