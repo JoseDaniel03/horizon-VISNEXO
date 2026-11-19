@@ -16,6 +16,11 @@ fn home(args:impl IntoIterator<Item=OsString>)->Option<PathBuf>{
 }
 pub fn wants_vsclient()->bool{
     let Some(dir)=home(std::env::args_os()) else{return false};
+    wants_vsclient_in(&dir)
+}
+/// Android receives the instance path from the verified native Activity
+/// handoff, not from process arguments. Both platforms use the same check.
+pub fn wants_vsclient_in(dir:&std::path::Path)->bool {
     let mod_file=dir.join("horizon-native-mods/vsclient.hnmod");
     let Ok(meta)=fs::symlink_metadata(&mod_file) else{return false};
     if !meta.is_file() || meta.file_type().is_symlink() || meta.len()>64*1024*1024 {
