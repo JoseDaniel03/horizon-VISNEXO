@@ -16,7 +16,6 @@ import time
 import urllib.request
 import hashlib
 import zipfile
-import tempfile
 
 import lab
 
@@ -130,11 +129,13 @@ def main():
     minecraft = private / 'minecraft'
     manifest, server = download_game(args.version, minecraft)
     java_home = args.java_home or download_jdk(manifest, private / 'jdk')
-    environment = dict(os.environ, JAVA_HOME=str(java_home.resolve()))
-    isolated = Path(tempfile.mkdtemp(prefix='prepare-', dir=private))
-    for key in ['HORIZON_HOME', 'HORIZON_LAUNCHER_HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME']:
-        environment[key] = str(isolated / key.lower())
-    environment.update(HORIZON_LAUNCHER_NO_SELF_UPDATE='1', HORIZON_NO_AUDIO='1')
+    # Preparing Android resources is a tooling task, not permission to read
+    # or overwrite a player's real Minecraft profile. Use the same isolated
+    # game environment as all other Horizon harnesses, even if the caller has
+    # a custom HORIZON_HOME or XDG override.
+    forbidden = ('HORIZON_HOME', 'HORIZON_LAUNCHER_HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME')
+    base = {key: value for key, value in os.environ.items() if key not in forbidden}
+    environment = lab.game_env(base, JAVA_HOME=str(java_home.resolve()))
     subprocess.run(['cargo', 'run', '-p', 'horizon-prepare', '--', '--root', str(ROOT), '--prepare',
                     '--minecraft-dir', str(minecraft), '--server-jar', str(server)],
                    cwd=ROOT, env=environment, check=True)
