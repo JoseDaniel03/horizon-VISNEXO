@@ -9,6 +9,10 @@ on:
       - 'launcher/src/native_mods.rs'
       - 'launcher/src/native_mods_tests.rs'
       - 'launcher/src/native_mods/**'
+      - 'crates/horizon-android/**'
+      - 'crates/horizon-official/**'
+      - 'crates/horizon-game/**'
+      - 'tools/android_build.py'
       - '.github/workflows/visclient-native.yml'
   pull_request:
     paths:
@@ -19,6 +23,10 @@ on:
       - 'launcher/src/native_mods.rs'
       - 'launcher/src/native_mods_tests.rs'
       - 'launcher/src/native_mods/**'
+      - 'crates/horizon-android/**'
+      - 'crates/horizon-official/**'
+      - 'crates/horizon-game/**'
+      - 'tools/android_build.py'
       - '.github/workflows/visclient-native.yml'
 
 permissions:
@@ -110,6 +118,27 @@ jobs:
           cargo check --locked -p horizon-official --bin horizon-official --features horizon-official/vis-vsclient
           cargo check --locked -p horizon-client --bin horizon-client --features vis-vsclient
           cargo check --locked -p horizon-client --bin horizon-client --no-default-features --features vis-vsclient
+
+  android-arm64:
+    name: VSClient prelinked Android ARM64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install NDK, build tools and check McRust + VSClient
+        shell: bash
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;28.2.13676358' 'build-tools;35.0.0'
+          python3 tools/android_build.py --check --abi arm64-v8a \
+            --sdk "$ANDROID_HOME" --java-home "$JAVA_HOME" \
+            --ndk-version 28.2.13676358 --build-tools-version 35.0.0
 
   native-loader:
     name: Native mod recognition and install
