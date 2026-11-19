@@ -113,6 +113,11 @@ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 
 [features]
 default = ["audio", "controllers", "horizon-extras"]
+# VIS Nexo compiles VSClient at build time, not while the player launches
+# the game. When a validated .hnmod is present in the selected instance,
+# the prelinked mod hooks activate automatically. No native code from a ZIP
+# is dynamically loaded by the client.
+vis-vsclient = []
 # Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
 # Linux: the server build (`--no-default-features`, released as horizon-engine; docs/server.md).
 audio = ["horizon-client-render/audio", "horizon-client-lib/audio"]
