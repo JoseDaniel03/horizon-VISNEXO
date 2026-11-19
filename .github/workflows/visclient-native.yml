@@ -6,6 +6,9 @@ on:
       - 'crates/horizon-client/Cargo.toml'
       - 'crates/horizon-client/src/mod_api.rs'
       - 'crates/horizon-client/tests/vsclient_native_port.rs'
+      - 'launcher/src/native_mods.rs'
+      - 'launcher/src/native_mods_tests.rs'
+      - 'launcher/src/native_mods/**'
       - '.github/workflows/visclient-native.yml'
   pull_request:
     paths:
@@ -13,6 +16,9 @@ on:
       - 'crates/horizon-client/Cargo.toml'
       - 'crates/horizon-client/src/mod_api.rs'
       - 'crates/horizon-client/tests/vsclient_native_port.rs'
+      - 'launcher/src/native_mods.rs'
+      - 'launcher/src/native_mods_tests.rs'
+      - 'launcher/src/native_mods/**'
       - '.github/workflows/visclient-native.yml'
 
 permissions:
@@ -88,9 +94,28 @@ jobs:
         run: |
           cargo check --locked -p horizon-client --test vsclient_native_port --no-default-features
 
+  native-loader:
+    name: Native mod recognition and install
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher
+          shared-key: vsclient-native-loader
+      - name: Install Linux libraries required by Horizon launcher
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev patchelf
+      - name: Verify .hnmod is detected and its fork SHA is preserved
+        run: |
+          cargo test --manifest-path launcher/Cargo.toml --locked --lib             native_archive_file_is_discovered_as_trait_mod_without_unzipping -- --nocapture
+
   package:
     name: Installable .hnmod
-    needs: [protocol, native-api]
+    needs: [protocol, native-api, native-loader]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
