@@ -1873,10 +1873,12 @@ dependencies = [
 name = "horizon-official"
 version = "0.1.0"
 dependencies = [
+ "horizon-client",
  "horizon-discord",
  "horizon-friends",
  "horizon-game",
  "horizon-heartbeat",
+ "horizon-mods",
  "horizon-official-servers",
  "horizon-platform",
  "log",
