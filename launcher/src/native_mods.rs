@@ -734,7 +734,10 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
             .map_err(|error| format!("Invalid native .hnmod {}: {error}", folder.display()))?;
         let source = fs::read(folder).map_err(|e| e.to_string())?;
         let digest = Sha256::digest(&source);
-        let key = digest[..12].iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let key = digest[..12]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
         let unpacked = root().join("file-import").join(&key);
         // Refresh the content atomically enough for a single native build:
         // never reuse a partial directory from an interrupted extraction.
@@ -1121,9 +1124,8 @@ fn ask_github(repo: &str, revision: &str) -> Result<String, String> {
         if repo != backend::REPO || !is_revision(revision) {
             return Err(upstream_error);
         }
-        let fork_url = format!(
-            "https://api.github.com/repos/JoseDaniel03/horizon-VISNEXO/commits/{revision}"
-        );
+        let fork_url =
+            format!("https://api.github.com/repos/JoseDaniel03/horizon-VISNEXO/commits/{revision}");
         crate::github::json(&fork_url)
     })?;
     commit["commit"]["committer"]["date"]
@@ -1167,11 +1169,11 @@ fn hooks_in(source: &str) -> Option<u32> {
 /// A specific native hook file at an exact pinned revision. The VIS fork
 /// carries client payload hook types not available in every upstream build.
 fn pinned_source_text(revision: &str, file: &str) -> Option<String> {
-    if !is_revision(revision) { return None; }
+    if !is_revision(revision) {
+        return None;
+    }
     for repository in [backend::REPO, "JoseDaniel03/horizon-VISNEXO"] {
-        let url = format!(
-            "https://raw.githubusercontent.com/{repository}/{revision}/{file}"
-        );
+        let url = format!("https://raw.githubusercontent.com/{repository}/{revision}/{file}");
         if let Ok(body) = backend::get(&url) {
             if let Ok(text) = body.into_string() {
                 return Some(text);
@@ -1988,9 +1990,7 @@ fn source(revision: &str) -> Result<PathBuf, String> {
     let top = match unpack_archive(&archive, &partial, u64::MAX) {
         Ok(source) => source,
         Err(upstream_error) => {
-            let from_fork = format!(
-                "https://codeload.github.com/{VIS_FORK}/tar.gz/{revision}"
-            );
+            let from_fork = format!("https://codeload.github.com/{VIS_FORK}/tar.gz/{revision}");
             unpack_archive(&from_fork, &partial, u64::MAX).map_err(|fork_error| {
                 format!(
                     "Cannot download pinned Horizon {revision} from upstream or the VIS fork.                     Upstream: {upstream_error}; VIS fork: {fork_error}"
