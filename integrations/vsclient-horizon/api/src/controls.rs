@@ -225,7 +225,9 @@ impl ControlsSession {
     }
     pub fn apply_state(&mut self, wire: &str) -> Result<Vec<InputAction>, &'static str> {
         let (revision, state) = parse_state(wire)?;
-        if self.state_revision.is_some_and(|r| revision < r) { return Ok(vec![]); }
+        // Equal revisions are retransmissions. Reapplying them can release a
+        // currently-held movement action and cause visible input stutter.
+        if self.state_revision.is_some_and(|r| revision <= r) { return Ok(vec![]); }
         let releases = if self.state != state { self.transition_release() } else { vec![] };
         self.state = state;
         self.state_revision = Some(revision);
@@ -234,7 +236,7 @@ impl ControlsSession {
     }
     pub fn apply_profile(&mut self, wire: &str) -> Result<Vec<InputAction>, &'static str> {
         let next = parse_profile(wire)?;
-        if self.profile.as_ref().is_some_and(|p| next.revision < p.revision) {
+        if self.profile.as_ref().is_some_and(|p| next.revision <= p.revision) {
             return Ok(vec![]);
         }
         let releases = self.transition_release();
@@ -473,6 +475,28 @@ mod tests {
         let closed=s.set_virtual_enabled(false);
         assert_eq!(closed.len(),1);
         assert!(!closed[0].pressed);
+    }
+    #[test]
+    fn duplicate_bridge_revisions_do_not_release_held_actions() {
+        let mut session=ControlsSession::default();
+        session.apply_state("8|10|DRIVING").unwrap();
+        session.apply_profile(profile()).unwrap();
+        let first=session.handle_key("key.keyboard.w",true,true);
+        assert_eq!(first.len(),1);
+        assert!(first[0].pressed);
+        // The same profile must not release the held accelerator, reset
+        // capture or send spurious press/release packets on retransmission.
+        assert!(session.apply_profile(profile()).unwrap().is_empty());
+        assert!(session.apply_state("8|10|FOOTBALL").unwrap().is_empty());
+        assert!(session.apply_state("8|9|FOOTBALL").unwrap().is_empty());
+        assert!(session.handle_key("key.keyboard.w",true,true).is_empty());
+        assert_eq!(session.handle_key("key.keyboard.w",false,true),
+            [InputAction{id:"tractor_prototipo:conduccion.forward".into(),pressed:false,sequence:2}]);
+        // A newer revision does release all actions on a genuine transition.
+        session.handle_key("key.keyboard.w",true,true);
+        let released=session.apply_state("8|11|FOOTBALL").unwrap();
+        assert_eq!(released.len(),1);
+        assert!(!released[0].pressed);
     }
     #[test]
     fn press_release_focus_loss_and_tracked_sequence() {
