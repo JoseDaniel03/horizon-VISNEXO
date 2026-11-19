@@ -107,6 +107,7 @@ jobs:
           sudo apt-get install -y libasound2-dev libudev-dev pkg-config
       - name: Typecheck complete Horizon client with built-in VSClient feature
         run: |
+          cargo check --locked -p horizon-official --bin horizon-official --features horizon-official/vis-vsclient
           cargo check --locked -p horizon-client --bin horizon-client --features vis-vsclient
           cargo check --locked -p horizon-client --bin horizon-client --no-default-features --features vis-vsclient
 
