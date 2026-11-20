@@ -469,7 +469,7 @@ impl Settings {
         for (i, source) in SOUND_SOURCES.iter().enumerate() {
             volumes[i] = f.double(&format!("soundCategory_{source}")) as f32;
         }
-        Self {
+        let settings = Self {
             fov: f.int("fov") as f32,
             render_distance: f.int("renderDistance"),
             simulation_distance: f.int("simulationDistance"),
@@ -549,7 +549,14 @@ impl Settings {
             resource_packs: f.list("resourcePacks"),
             keys,
             file: f,
-        }
+        };
+        #[cfg(target_os = "android")]
+        let settings = {
+            let mut settings = settings;
+            crate::options_ui::enforce_android_quality(&mut settings);
+            settings
+        };
+        settings
     }
     /// `Options.createInformation`: what the server learns about this player.
     pub fn client_information(&self, view_distance: i8) -> ClientInformation {

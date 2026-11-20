@@ -19,3 +19,5 @@ pub fn has_resource_installer() -> bool { INSTALLER.get().is_some() }
 pub fn prepare_resources(root: &Path) -> Result<(), String> {
     INSTALLER.get().ok_or("Android resource installer missing")?(root)
 }
+
+pub use crate::skins::set_android_skin;

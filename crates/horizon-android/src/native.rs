@@ -1,5 +1,5 @@
 //! Android host only: all gameplay, rendering, saves and network packets come from PC's crate.
-use jni::{JavaVM, objects::{JObject, JString, JValue}};
+use jni::{JavaVM, objects::{JByteArray, JObject, JString, JValue}};
 use serde::Deserialize;
 use std::{path::{Path, PathBuf}, sync::OnceLock};
 use winit::platform::android::activity::AndroidApp;
@@ -20,11 +20,11 @@ struct Launch {
     // files, so no arbitrary native source crosses an app boundary.
     #[serde(default)] vsclient:bool,
 }
-fn launch(app: &AndroidApp) -> Option<Launch> {
+fn launch(app: &AndroidApp) -> Option<(Launch, PathBuf)> {
     // AndroidApp owns the Activity and VM for the lifetime of android_main.
     let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
     let mut env = vm.attach_current_thread().ok()?;
-    env.with_local_frame(16, |env| -> jni::errors::Result<Option<Launch>> {
+    env.with_local_frame(16, |env| -> jni::errors::Result<Option<(Launch, PathBuf)>> {
         let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
         let intent = env.call_method(&activity,"getIntent","()Landroid/content/Intent;",&[])?.l()?;
         let key = JObject::from(env.new_string("vis_nexo_launch")?);
@@ -39,8 +39,44 @@ fn launch(app: &AndroidApp) -> Option<Launch> {
             && request.instance.len()==32 && request.instance.bytes().all(|c|c.is_ascii_hexdigit())
             && !request.name.is_empty() && request.name.len()<=16 && request.name.bytes().all(|c|c.is_ascii_alphanumeric()||c==b'_')
             && request.server.len()<=253 && request.server.bytes().all(|c|c.is_ascii_alphanumeric()||b".-:[]".contains(&c));
-        Ok(valid.then_some(request))
+        if !valid {
+            return Ok(None);
+        }
+        if let Err(error) = load_vis_skin(env, &intent) {
+            if env.exception_check()? {
+                env.exception_clear()?;
+            }
+            log::warn!("VIS skin handoff was unavailable: {error}");
+        }
+        let loader = env.call_method(&activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?.l()?;
+        let class_name = JObject::from(env.new_string("dev.horizon.android.VisGameStore")?);
+        let class = env.call_method(loader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;",
+            &[JValue::Object(&class_name)])?.l()?;
+        let owner = JObject::from(env.new_string(&request.owner)?);
+        let id = JObject::from(env.new_string(&request.instance)?);
+        let path = env.call_static_method(jni::objects::JClass::from(class), "pathForLaunch",
+            "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(&activity), JValue::Object(&owner), JValue::Object(&id)])?.l()?;
+        let path: String = env.get_string(&JString::from(path))?.into();
+        Ok(Some((request, PathBuf::from(path))))
     }).ok().flatten()
+}
+fn load_vis_skin(env: &mut jni::JNIEnv<'_>, intent: &JObject<'_>) -> jni::errors::Result<()> {
+    let key = JObject::from(env.new_string("vis_nexo_skin")?);
+    let raw = env.call_method(intent, "getStringExtra", "(Ljava/lang/String;)Ljava/lang/String;",
+        &[JValue::Object(&key)])?.l()?;
+    if raw.is_null() {
+        return Ok(());
+    }
+    let text: String = env.get_string(&JString::from(raw))?.into();
+    let Some(encoded) = text.strip_prefix("data:image/png;base64,") else { return Ok(()); };
+    if encoded.len() > 87400 { return Ok(()); }
+    let encoded = JObject::from(env.new_string(encoded)?);
+    let bytes = env.call_static_method("android/util/Base64", "decode", "(Ljava/lang/String;I)[B",
+        &[JValue::Object(&encoded), JValue::Int(0)])?.l()?;
+    let png = env.convert_byte_array(JByteArray::from(bytes))?;
+    horizon_game::android::set_android_skin(&png);
+    Ok(())
 }
 // The Java provider can read a failure even when the renderer never starts.
 fn record_startup_failure(home: &Path, stage: &str) {
@@ -64,8 +100,7 @@ fn android_main(app:AndroidApp){
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("VIS-McRust"));
     let Some(home)=app.internal_data_path() else{return;};
     let _ = std::fs::remove_file(home.join("vis-startup-error"));
-    let Some(request)=launch(&app) else {record_startup_failure(&home, "Validación de la solicitud de VIS Nexo"); log::error!("Missing or incompatible Nexo engine handoff");return;};
-    let game=home.join("vis-worlds").join(&request.owner).join(&request.instance);
+    let Some((request, game))=launch(&app) else {record_startup_failure(&home, "Validación de la solicitud de VIS Nexo"); log::error!("Missing or incompatible Nexo engine handoff");return;};
     if let Err(error)=std::fs::create_dir_all(&game){record_startup_failure(&home, "Apertura de la carpeta de instancia"); log::error!("Game folder: {error}");return;}
     let copy=(||->std::io::Result<()>{
         let mut data=app.asset_manager().open(c"engine-data.zip").ok_or_else(||std::io::Error::other("Missing generated engine tables"))?;
@@ -76,7 +111,7 @@ fn android_main(app:AndroidApp){
     if let Err(error)=copy {record_startup_failure(&home, "Extracción de las tablas del motor"); log::error!("Engine resources: {error}");return;}
     let resources=home.join(".local/horizon-client").join(horizon_game::VANILLA_VERSION);
     let requested_vsclient=request.vsclient;
-    let mut args=vec!["--resources".into(),resources.to_string_lossy().into_owned(),"--game-dir".into(),game.to_string_lossy().into_owned(),"--home".into(),home.to_string_lossy().into_owned(),"--name".into(),request.name,"--fullscreen".into(),"--render-distance".into(),"6".into()];
+    let mut args=vec!["--resources".into(),resources.to_string_lossy().into_owned(),"--game-dir".into(),game.to_string_lossy().into_owned(),"--home".into(),home.to_string_lossy().into_owned(),"--name".into(),request.name,"--fullscreen".into()];
     if !request.server.is_empty(){args.extend(["--server".into(),request.server]);}
     let _=HOME.set(home);
     horizon_game::android::initialize(app,args,prepare);

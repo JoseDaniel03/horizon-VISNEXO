@@ -35,6 +35,17 @@ public final class VisGameStore extends ContentProvider {
         return path;
     }
     private static String pref(String owner, String id) { return owner + "/" + id; }
+    public static synchronized String pathForLaunch(Activity activity, String owner, String id) throws IOException {
+        identifiers(owner, id);
+        String storage = activity.getSharedPreferences("vis-storage", 0).getString(pref(owner, id), "internal");
+        // Older builds placed world files internally even for external instances.
+        if ("external".equals(storage)) {
+            File legacy = instance(activity, "internal", owner, id);
+            String[] contents = legacy.list();
+            if (contents != null && contents.length > 0) return legacy.getAbsolutePath();
+        }
+        return instance(activity, storage, owner, id).getAbsolutePath();
+    }
     public static synchronized String begin(Activity activity, String owner, String id) throws IOException {
         identifiers(owner, id);
         if (active) throw new IOException("Game already running");

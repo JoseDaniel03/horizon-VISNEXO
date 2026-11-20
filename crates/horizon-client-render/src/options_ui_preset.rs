@@ -2,13 +2,16 @@
 //! options `GraphicsPreset.apply` sets.
 use super::*;
 
+#[cfg(not(target_os = "android"))]
 pub(crate) const PRESETS: [&str; 4] = ["fast", "fancy", "fabulous", "custom"];
 /// `SliderableEnum.fromSliderValue`: the slider's 0..1 position maps by
 /// `floor(v * values)` with 1.0 just below it, clamped to the last stop (4
 /// graphics presets), not by rounding `v * 3`.
+#[cfg(target_os = "android")]
+pub(crate) const PRESETS: [&str; 3] = ["fast", "fancy", "fabulous"];
 pub(crate) fn preset_from_slider(v: f32) -> usize {
     let v = if v >= 1.0 { 0.99999 } else { v };
-    ((v * 4.0).floor() as usize).min(3)
+    ((v * PRESETS.len() as f32).floor() as usize).min(PRESETS.len() - 1)
 }
 pub(crate) fn preset_index(p: &str) -> usize {
     PRESETS.iter().position(|x| *x == p).unwrap_or(1)
@@ -42,6 +45,26 @@ pub(crate) fn drag_slider(opt: Opt, s: &mut Settings, v: f32, events: &mut Vec<E
 }
 /// GraphicsPreset.apply: the options Fast, Fancy and Fabulous set.
 pub(crate) fn apply_preset(s: &mut Settings) {
+    #[cfg(target_os = "android")]
+    {
+        let tier = preset_index(&s.graphics_preset);
+        s.max_fps = [30, 60, 60][tier];
+        s.simulation_distance = [5, 5, 6][tier];
+        s.biome_blend = [0, 1, 2][tier];
+        s.smooth_lighting = tier != 0;
+        s.clouds = if tier == 2 { "fast" } else { "false" }.into();
+        s.particles = [2, 1, 0][tier];
+        s.mipmap_levels = [1, 2, 3][tier];
+        s.entity_shadows = tier == 2;
+        s.entity_distance = [0.5, 0.75, 1.0][tier];
+        s.menu_blur = 0;
+        s.improved_transparency = false;
+        s.weather_radius = [3, 4, 6][tier];
+        set_filtering(s, 1, 0);
+        return;
+    }
+    #[cfg(not(target_os = "android"))]
+    {
     let fabulous = s.graphics_preset == "fabulous";
     match s.graphics_preset.as_str() {
         "fast" => {
@@ -88,6 +111,7 @@ pub(crate) fn apply_preset(s: &mut Settings) {
         }
         _ => {}
     }
+}
 }
 /// The preset's `maxAnisotropyBit` and `textureFiltering` (0 none, 1 RGSS, 2 anisotropic).
 fn set_filtering(s: &mut Settings, anisotropy_bit: i32, filtering: i32) {

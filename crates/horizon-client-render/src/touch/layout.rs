@@ -124,6 +124,17 @@ impl Placement {
     /// for a surface `aspect` (width / height) wide.
     pub fn rect(self, aspect: f32) -> [f32; 4] {
         let w = self.size / aspect.max(0.1);
+        #[cfg(target_os = "android")]
+        {
+            let width = w.min(0.95);
+            return [
+                (self.center[0] - width / 2.0).clamp(0.02, 0.98 - width),
+                (self.center[1] - self.size / 2.0).clamp(0.02, 0.98 - self.size),
+                width,
+                self.size,
+            ];
+        }
+        #[cfg(not(target_os = "android"))]
         [
             self.center[0] - w / 2.0,
             self.center[1] - self.size / 2.0,

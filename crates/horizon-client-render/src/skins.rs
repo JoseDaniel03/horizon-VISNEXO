@@ -759,11 +759,34 @@ pub fn offline_cape() -> Option<&'static [u8]> {
     .as_deref()
 }
 
+#[cfg(target_os = "android")]
+static ANDROID_SKIN: std::sync::OnceLock<(Vec<u8>, bool)> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "android")]
+pub fn set_android_skin(png: &[u8]) {
+    // Reject oversized textures before the PNG decoder allocates a buffer.
+    if png.len() > 65536 || png.get(12..16) != Some(b"IHDR")
+        || png.get(16..20) != Some(&64u32.to_be_bytes()[..])
+        || !matches!(png.get(20..24), Some([0, 0, 0, 32 | 64]))
+    {
+        return;
+    }
+    if let Ok((w, h, rgba)) = crate::hud::decode_bytes(png)
+        && let Some(rgba) = process_legacy_skin(w, h, &rgba)
+    {
+        let _ = ANDROID_SKIN.set((rgba, false));
+    }
+}
+
 /// The skin the launcher gives an offline name (`HORIZON_OFFLINE_SKIN`, a
 /// PNG's path, and `HORIZON_OFFLINE_SKIN_MODEL`, `classic` or `slim`;
 /// launcher/src/skins.rs): its 64x64 RGBA as `process_legacy_skin` lays it
 /// out, and whether it is slim. Read once.
 pub fn offline_skin() -> Option<&'static (Vec<u8>, bool)> {
+    #[cfg(target_os = "android")]
+    if let Some(skin) = ANDROID_SKIN.get() {
+        return Some(skin);
+    }
     static SKIN: std::sync::OnceLock<Option<(Vec<u8>, bool)>> = std::sync::OnceLock::new();
     SKIN.get_or_init(|| {
         let path = std::env::var_os("HORIZON_OFFLINE_SKIN").filter(|p| !p.is_empty())?;

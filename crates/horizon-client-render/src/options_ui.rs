@@ -369,7 +369,7 @@ impl Opt {
             Opt::CloudRange => unit(s.cloud_range as f32, 2.0, 128.0),
             Opt::EntityDistance => unit(s.entity_distance, 0.5, 5.0),
             Opt::BiomeBlend => unit(s.biome_blend as f32, 0.0, 7.0),
-            Opt::Preset => unit(preset_index(&s.graphics_preset) as f32, 0.0, 3.0),
+            Opt::Preset => unit(preset_index(&s.graphics_preset) as f32, 0.0, (PRESETS.len() - 1) as f32),
             Opt::Mipmaps => unit(s.mipmap_levels as f32, 0.0, 4.0),
             Opt::MaxAnisotropy => unit(s.file.int("maxAnisotropyBit") as f32, 1.0, 3.0),
             Opt::ExclusiveMode => {
@@ -589,6 +589,9 @@ impl Opt {
                     s.biome_blend * 2 + 1
                 )),
             ),
+            #[cfg(target_os = "android")]
+            Opt::Preset => generic(c, Text::literal(["Rendimiento", "Normal", "Completo"][preset_index(&s.graphics_preset)])),
+            #[cfg(not(target_os = "android"))]
             Opt::Preset => generic(c, tr(&format!("options.graphics.{}", s.graphics_preset))),
             Opt::MaxAnisotropy => match s.file.int("maxAnisotropyBit") {
                 0 => generic(c, tr("options.off")),
@@ -958,7 +961,7 @@ impl Opt {
             Opt::Page(page, row) => pages::slide(page, row, v),
             _ => {}
         }
-        if self.affects_preset() {
+        if self.affects_preset() && !(cfg!(target_os = "android") && self == Opt::RenderDistance) {
             s.graphics_preset = "custom".into();
         }
     }
@@ -1204,7 +1207,7 @@ impl Opt {
             Opt::PadRadialMode | Opt::PadRadialStick => self.radial_step(s, back),
             _ => {}
         }
-        if self.affects_preset() {
+        if self.affects_preset() && !(cfg!(target_os = "android") && self == Opt::RenderDistance) {
             s.graphics_preset = "custom".into();
         }
     }
@@ -2479,6 +2482,14 @@ impl OptionsUi {
                 rows.extend(self.agent_status.iter().cloned().map(Row::Note));
                 rows
             }
+            #[cfg(target_os = "android")]
+            Page::Video => vec![
+                Row::Big(Opt::Preset),
+                Row::Big(Opt::RenderDistance),
+                Row::Big(Opt::GuiScale),
+                Row::Big(Opt::Gamma),
+            ],
+            #[cfg(not(target_os = "android"))]
             Page::Video => {
                 // Vanilla's VideoSettingsScreen as vanilla lays it out. No menu opens it (Video
                 // Settings... opens the graphics screen, which has all of it); it stays for
@@ -2801,7 +2812,7 @@ impl OptionsUi {
                     ("options.sounds", Some(Page::Sound)),
                     // Video Settings... opens Horizon's graphics screen, which holds every
                     // video option, as Sodium's replaces vanilla's.
-                    ("options.video", Some(Page::Graphics)),
+                    ("options.video", Some(if cfg!(target_os = "android") { Page::Video } else { Page::Graphics })),
                     ("options.controls", Some(Page::Controls)),
                     (
                         "options.language",
@@ -2823,7 +2834,10 @@ impl OptionsUi {
                 // horizon-extras: without it, vanilla's last row instead of Horizon Settings and
                 // Mods: Telemetry Data (greyed: nothing is sent) and Credits & Attribution.
                 let plain;
-                let entries: &[_] = if horizon_extras() {
+                let entries: &[_] = if cfg!(target_os = "android") {
+                    plain = entries[..8].iter().copied().filter(|(_, page)| !matches!(page, Some(Page::Controls | Page::Packs))).collect::<Vec<_>>();
+                    &plain
+                } else if horizon_extras() {
                     &entries
                 } else {
                     plain = [
@@ -8171,3 +8185,12 @@ pub(crate) use preset::{
 mod graphics_tests;
 #[path = "options_ui_pages.rs"]
 mod pages;
+
+
+#[cfg(target_os = "android")]
+pub(crate) fn enforce_android_quality(settings: &mut Settings) {
+    if !PRESETS.contains(&settings.graphics_preset.as_str()) {
+        settings.graphics_preset = "fancy".into();
+    }
+    apply_preset(settings);
+}
