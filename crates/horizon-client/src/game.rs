@@ -2375,6 +2375,8 @@ struct Game<'a> {
     #[cfg(target_os = "android")]
     android_touch: horizon_client_render::touch::TouchControls,
     #[cfg(target_os = "android")]
+    android_back_touch: Option<u64>,
+    #[cfg(target_os = "android")]
     android_suspended: bool,
     frames: u64,
     /// The glint clock and options, read once at the start of each frame
@@ -5854,6 +5856,8 @@ impl Game<'_> {
         self.frame_graph
             .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
         self.draw_pad_over_hud(&mut batch);
+        #[cfg(target_os = "android")]
+        self.android_touch_hud(&mut batch);
         #[cfg(feature = "friends")]
         self.draw_vis_notice(&mut batch);
         batch
@@ -6303,8 +6307,6 @@ impl Game<'_> {
         if show_hud {
             self.draw_pad_guide(&mut batch, guide_from);
         }
-        #[cfg(target_os = "android")]
-        self.android_touch_hud(&mut batch);
         batch
     }
     fn draw_inventory(&mut self, batch: &mut HudBatch) {
@@ -11602,6 +11604,8 @@ impl<'a> Game<'a> {
             pad: Default::default(),
             #[cfg(target_os = "android")]
             android_touch: android_touch::controls(),
+            #[cfg(target_os = "android")]
+            android_back_touch: None,
             #[cfg(target_os = "android")]
             android_suspended: false,
             frames: 0,

@@ -15,6 +15,8 @@ pub(super) struct StartupMenu {
     title: Option<Title>,
     options: OptionsUi,
     options_open: bool,
+    #[cfg(target_os = "android")]
+    back_touch: Option<u64>,
     /// The credits from Credits & Attribution, and their last frame.
     win: Option<(horizon_client::win_screen::WinScreen, Instant)>,
     root: PathBuf,
@@ -1013,6 +1015,37 @@ impl Loading {
         if let WindowEvent::Touch(touch) = &event {
             use winit::event::TouchPhase;
             let touch=*touch;
+            let size = self.menu_size();
+            if self.menu.back_touch == Some(touch.id) {
+                if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                    self.menu.back_touch = None;
+                    if touch.phase == TouchPhase::Ended {
+                        if self.menu.pending.take().is_some() {
+                            self.menu.perf.cancel_world_opening();
+                        } else if self.menu.win.take().is_none() {
+                            if self.menu.options_open {
+                                if let Some(gui) = &self.gui {
+                                    let events = self.menu.options.key(
+                                        &mut self.settings, &gui.atlas, KeyCode::Escape, None,
+                                    );
+                                    self.menu_option_events(events);
+                                }
+                            } else if let Some(title) = &mut self.menu.title {
+                                title.escape();
+                                self.save_menu_settings();
+                            }
+                        }
+                    }
+                }
+                return Ok(());
+            }
+            if self.gui.is_some() && touch.phase == TouchPhase::Started
+                && super::android_touch::back_hit(&HudBatch::new(size), touch.location, size)
+            {
+                self.menu.back_touch = Some(touch.id);
+                return Ok(());
+            }
+
             self.menu_event(event_loop,WindowEvent::CursorMoved{device_id:touch.device_id,position:touch.location})?;
             if touch.phase!=TouchPhase::Moved {
                 self.menu_event(event_loop,WindowEvent::MouseInput{device_id:touch.device_id,state:if touch.phase==TouchPhase::Started{ElementState::Pressed}else{ElementState::Released},button:MouseButton::Left})?;
@@ -1338,6 +1371,8 @@ impl Loading {
             key_focus::draw_outline(&gui.atlas, batch, focus);
         }
         // Over every screen, as the game's; no sound before the sound engine.
+        #[cfg(target_os = "android")]
+        super::android_touch::draw_back(batch, &gui.atlas);
         let title_toast = self.menu.title.as_ref().is_some_and(|t| t.has_toast());
         super::narrator::draw_toast(
             &mut self.menu.narrator_toast,

@@ -73,7 +73,11 @@ impl Game<'_> {
         }
         #[cfg(target_os = "android")]
         {
-            if matches!(event, WindowEvent::Focused(false)) { self.android_touch.clear(); }
+            if matches!(event, WindowEvent::Focused(false)) {
+                self.android_touch.clear();
+                self.android_back_touch = None;
+                self.stop_sounds_for_new_level();
+            }
             if let WindowEvent::Touch(touch) = &event {
                 self.android_touch_event(event_loop,id,*touch,origin);
                 return;
@@ -291,6 +295,9 @@ impl ApplicationHandler for Game<'_> {
     #[cfg(target_os = "android")]
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         self.android_suspended = true;
+        self.android_back_touch = None;
+        self.stop_sounds_for_new_level();
+        self.audio.android_set_backgrounded(true);
         self.android_touch.clear();
         self.capture(false);
         self.keys.clear();
@@ -304,6 +311,7 @@ impl ApplicationHandler for Game<'_> {
         #[cfg(target_os = "android")]
         if self.android_suspended {
             self.android_suspended = false;
+            self.audio.android_set_backgrounded(false);
             if let Some(renderer) = &mut self.renderer {
                 if let Err(error) = renderer.recreate_surface() { self.error = Some(error); event_loop.exit(); }
             }
@@ -426,6 +434,8 @@ impl ApplicationHandler for Game<'_> {
     /// applicationWillTerminate without a CloseRequested; vanilla's GLFW
     /// window turns it into a window close, so Minecraft.stop saves the world.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        self.stop_sounds_for_new_level();
         self.shut_down();
     }
 }

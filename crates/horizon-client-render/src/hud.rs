@@ -1440,6 +1440,22 @@ impl HudAtlas {
                 decode_bytes(include_bytes!("jei_recipes/config_button.png"))?;
             images.push(("horizon/recipes/settings".to_owned(), width, height, rgba));
         }
+        #[cfg(target_os = "android")]
+        for (name, bytes) in [
+            ("vis/touch/stick", &include_bytes!("android_touch_assets/stick.png")[..]),
+            ("vis/touch/jump", &include_bytes!("android_touch_assets/jump.png")[..]),
+            ("vis/touch/sneak", &include_bytes!("android_touch_assets/sneak.png")[..]),
+            ("vis/touch/attack", &include_bytes!("android_touch_assets/attack.png")[..]),
+            ("vis/touch/use", &include_bytes!("android_touch_assets/use.png")[..]),
+            ("vis/touch/pause", &include_bytes!("android_touch_assets/pause.png")[..]),
+            ("vis/touch/inventory", &include_bytes!("android_touch_assets/inventory.png")[..]),
+            ("vis/touch/offhand", &include_bytes!("android_touch_assets/offhand.png")[..]),
+            ("vis/touch/custom_shield", &include_bytes!("android_touch_assets/custom_shield.png")[..]),
+            ("vis/touch/custom_cross", &include_bytes!("android_touch_assets/custom_cross.png")[..]),
+        ] {
+            let (width, height, rgba) = decode_bytes(bytes)?;
+            images.push((name.to_owned(), width, height, rgba));
+        }
         images.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
         let (width, placements, glyph_region) =
             Self::layout_leaving_out(&mut images, &mut animated, &cit_names, MAX_ATLAS_SIZE)

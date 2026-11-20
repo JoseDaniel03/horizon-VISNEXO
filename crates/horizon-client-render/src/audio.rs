@@ -1879,6 +1879,18 @@ impl Audio {
     pub fn resume(&mut self) {
         self.engine.resume(&mut self.backend);
     }
+    #[cfg(target_os = "android")]
+    pub fn android_set_backgrounded(&self, backgrounded: bool) {
+        let Some(stream) = &self._stream else { return; };
+        let result = if backgrounded {
+            stream.pause().map_err(|error| error.to_string())
+        } else {
+            stream.play().map_err(|error| error.to_string())
+        };
+        if let Err(error) = result {
+            log::warn!("Horizon: Android audio stream lifecycle: {error}");
+        }
+    }
     /// `SoundManager.stop()`: every sound.
     pub fn stop_all(&mut self) {
         self.engine.stop_all(&mut self.backend);
