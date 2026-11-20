@@ -42,27 +42,38 @@ fn launch(app: &AndroidApp) -> Option<Launch> {
         Ok(valid.then_some(request))
     }).ok().flatten()
 }
+// The Java provider can read a failure even when the renderer never starts.
+fn record_startup_failure(home: &Path, stage: &str) {
+    let temp = home.join("vis-startup-error.tmp");
+    if std::fs::write(&temp, stage).is_ok() {
+        let _ = std::fs::rename(temp, home.join("vis-startup-error"));
+    }
+}
 fn prepare(root:&Path)->std::result::Result<(),String>{
     let home=HOME.get().ok_or("Android home missing")?;
     let marker=root.join("vis-engine-commit");
     if std::fs::read_to_string(&marker).ok().as_deref()==Some(COMMIT) && crate::official_install::ready(home){ return Ok(()); }
-    crate::official_install::install_with_progress(home, |_|{}).map_err(|e|e.to_string())?;
+    crate::official_install::install_with_progress(home, |_|{}).map_err(|error| {
+        record_startup_failure(home, "Preparación de recursos oficiales");
+        error.to_string()
+    })?;
     std::fs::write(marker,COMMIT).map_err(|e|e.to_string())
 }
 #[unsafe(no_mangle)]
 fn android_main(app:AndroidApp){
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("VIS-McRust"));
     let Some(home)=app.internal_data_path() else{return;};
-    let Some(request)=launch(&app) else {log::error!("Missing or incompatible Nexo engine handoff");return;};
+    let _ = std::fs::remove_file(home.join("vis-startup-error"));
+    let Some(request)=launch(&app) else {record_startup_failure(&home, "Validación de la solicitud de VIS Nexo"); log::error!("Missing or incompatible Nexo engine handoff");return;};
     let game=home.join("vis-worlds").join(&request.owner).join(&request.instance);
-    if let Err(error)=std::fs::create_dir_all(&game){log::error!("Game folder: {error}");return;}
+    if let Err(error)=std::fs::create_dir_all(&game){record_startup_failure(&home, "Apertura de la carpeta de instancia"); log::error!("Game folder: {error}");return;}
     let copy=(||->std::io::Result<()>{
         let mut data=app.asset_manager().open(c"engine-data.zip").ok_or_else(||std::io::Error::other("Missing generated engine tables"))?;
         let temp=home.join("engine-data.partial");
         std::io::copy(&mut data,&mut std::fs::File::create(&temp)?)?;
         std::fs::rename(temp,home.join("engine-data.zip"))
     })();
-    if let Err(error)=copy {log::error!("Engine resources: {error}");return;}
+    if let Err(error)=copy {record_startup_failure(&home, "Extracción de las tablas del motor"); log::error!("Engine resources: {error}");return;}
     let resources=home.join(".local/horizon-client").join(horizon_game::VANILLA_VERSION);
     let requested_vsclient=request.vsclient;
     let mut args=vec!["--resources".into(),resources.to_string_lossy().into_owned(),"--game-dir".into(),game.to_string_lossy().into_owned(),"--home".into(),home.to_string_lossy().into_owned(),"--name".into(),request.name,"--fullscreen".into(),"--render-distance".into(),"6".into()];

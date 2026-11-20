@@ -90,6 +90,15 @@ public final class VisGameStore extends ContentProvider {
     private Bundle diagnostics() {
         Bundle result = new Bundle();
         StringBuilder report = new StringBuilder("VIS Nexo Rust Android\n");
+        File startup = new File(getContext().getFilesDir(), "vis-startup-error");
+        try (java.io.RandomAccessFile input = new java.io.RandomAccessFile(startup, "r")) {
+            byte[] bytes = new byte[(int)Math.min(input.length(), 160)];
+            input.readFully(bytes);
+            report.append("Startup failure: ").append(startup.lastModified()).append('\n')
+                .append("Etapa: ").append(new String(bytes, java.nio.charset.StandardCharsets.UTF_8)).append('\n');
+        } catch (IOException ignored) {
+            // A successful startup has no error file.
+        }
         // Android 11+ exit history, without requiring the API on older devices.
         try {
             Object manager = android.content.Context.class.getMethod("getSystemService", String.class)
