@@ -797,8 +797,70 @@ pub fn offline_skin() -> Option<&'static (Vec<u8>, bool)> {
     })
     .as_ref()
 }
+/// The launcher atomically updates one per-account reference while the game runs.
+#[derive(Default)]
+struct VisSkin {
+    next_check: Option<std::time::Instant>,
+    selected: Option<String>,
+    revision: u64,
+    texture: Option<std::sync::Arc<(Vec<u8>, bool)>>,
+}
+static VIS_SKIN: std::sync::Mutex<VisSkin> = std::sync::Mutex::new(VisSkin {
+    next_check: None, selected: None, revision: 0, texture: None,
+});
+
+fn vis_skin_reference() -> Option<&'static std::path::Path> {
+    static REFERENCE: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    REFERENCE.get_or_init(|| std::env::var_os("VIS_LIVE_SKIN_REFERENCE").map(Into::into)).as_deref()
+}
+
+pub fn poll_vis_skin() -> bool {
+    use std::{io::Read, path::Path, time::{Duration, Instant}};
+    let Some(reference) = vis_skin_reference() else { return false; };
+    let (Some(root), Ok(mut state)) = (reference.parent(), VIS_SKIN.lock()) else { return false; };
+    let now = Instant::now();
+    if state.next_check.is_some_and(|next| next > now) { return false; }
+    state.next_check = Some(now + Duration::from_millis(350));
+    let Ok(file) = std::fs::File::open(reference) else { return false; };
+    let mut bytes = Vec::new();
+    if file.take(4097).read_to_end(&mut bytes).is_err() || bytes.len() > 4096 { return false; }
+    let Ok(selected) = serde_json::from_slice::<Option<String>>(&bytes) else { return false; };
+    if selected == state.selected { return false; }
+    let texture = if let Some(name) = selected.as_deref() {
+        let name = Path::new(name);
+        if name.file_name() != Some(name.as_os_str()) || name.extension().and_then(|s| s.to_str()) != Some("png") {
+            return false;
+        }
+        let Ok(path) = root.join(name).canonicalize() else { return false; };
+        if path.parent() != Some(root) { return false; }
+        let Ok(texture) = read_offline_skin(&path, "classic") else { return false; };
+        Some(std::sync::Arc::new(texture))
+    } else {
+        None
+    };
+    state.selected = selected;
+    state.revision = state.revision.wrapping_add(1);
+    state.texture = texture;
+    true
+}
+
+pub fn vis_skin_enabled() -> bool { vis_skin_reference().is_some() }
+pub fn vis_skin_texture() -> Option<(u64, std::sync::Arc<(Vec<u8>, bool)>)> {
+    let state = VIS_SKIN.lock().ok()?;
+    Some((state.revision, state.texture.clone()?))
+}
+
 fn read_offline_skin(path: &std::path::Path, model: &str) -> Result<(Vec<u8>, bool), String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path).map_err(|e| e.to_string())?.take(1024 * 1024 + 1)
+        .read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    if bytes.len() > 1024 * 1024 || bytes.get(12..16) != Some(b"IHDR")
+        || bytes.get(16..20) != Some(&64u32.to_be_bytes()[..])
+        || !matches!(bytes.get(20..24), Some([0, 0, 0, 32 | 64]))
+    {
+        return Err("not a bounded 64x64 or 64x32 PNG".into());
+    }
     let (w, h, rgba) = crate::hud::decode_bytes(&bytes).map_err(|e| e.to_string())?;
     let skin = process_legacy_skin(w, h, &rgba).ok_or("not a 64x64 or 64x32 skin")?;
     Ok((skin, model == "slim"))

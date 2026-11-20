@@ -5680,17 +5680,24 @@ impl Game<'_> {
         }
         // An offline name's skin from the launcher, where neither the server
         // nor an account gives the local player one.
-        if !resolved.iter().any(|(u, _)| *u == local)
-            && let Some((rgba, is_slim)) = horizon_client::skins::offline_skin()
-        {
-            const OFFLINE: &str = "horizon/offline_skin";
-            if !self.skin_slots.contains(OFFLINE) || !self.gui.atlas.sprites.contains_key(OFFLINE) {
-                self.store_skin(OFFLINE.into(), rgba.clone());
+        if !resolved.iter().any(|(uuid, _)| *uuid == local) {
+            let live = horizon_client::skins::vis_skin_texture();
+            let fallback = if horizon_client::skins::vis_skin_enabled() {
+                None
+            } else {
+                horizon_client::skins::offline_skin()
+            };
+            if let Some((rgba, is_slim)) = live.as_ref().map(|(_, skin)| skin.as_ref()).or(fallback) {
+                let key = live.as_ref().map_or_else(
+                    || "horizon/offline_skin".to_owned(),
+                    |(revision, _)| format!("skins/vis-local-{revision}"),
+                );
+                if !self.skin_slots.contains(&key) || !self.gui.atlas.sprites.contains_key(&key) {
+                    self.store_skin(key.clone(), rgba.clone());
+                }
+                if *is_slim { slim.insert(local); }
+                resolved.push((local, key));
             }
-            if *is_slim {
-                slim.insert(local);
-            }
-            resolved.push((local, OFFLINE.into()));
         }
         // An offline name's cape from the launcher, where the profile has none.
         if !capes.contains_key(&local)

@@ -189,6 +189,9 @@ impl Game<'_> {
     pub(super) fn idle(&mut self, event_loop: &dyn EventLoopCtl) {
         #[cfg(target_os = "android")]
         if self.android_suspended { return; }
+        if self.remote.is_some() && horizon_client::skins::poll_vis_skin() {
+            self.update_remote_skins();
+        }
         // A splitscreen player's game has nothing to save: P1's shuts the process down.
         if horizon_threads::stop_requests() > 0
             && !self.options.split_guest
