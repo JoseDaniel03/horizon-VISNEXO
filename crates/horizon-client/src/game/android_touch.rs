@@ -1,5 +1,3 @@
-/tmp/mcrust-mobile-ui/crates/horizon-client/src/game/android_touch.rs:
-
 //! Android translates touch into existing controller/mouse paths; simulation stays shared.
 use super::*;
 use horizon_client_render::touch::{
@@ -9,6 +7,7 @@ use horizon_client_render::touch::{
 use winit::event::{Touch, TouchPhase};
 pub(super) fn controls() -> TouchControls {
     let mut controls = TouchControls::default();
+    controls.settings.sensitivity = 1.35;
     for c in [
         Control::Chat,
         Control::Settings,
