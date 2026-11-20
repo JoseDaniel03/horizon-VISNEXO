@@ -119,7 +119,15 @@ public final class VisGameStore extends ContentProvider {
                     case 5: cause = "Fallo nativo"; break;
                     case 6: cause = "La aplicación dejó de responder"; break;
                     case 2: cause = "Proceso terminado por señal"; break;
-                    default: cause = null;
+                    case 1: cause = "Salida del proceso (consultá el estado de salida)"; break;
+                    case 7: cause = "Fallo al inicializar el proceso"; break;
+                    case 9: cause = "Android terminó el proceso por uso excesivo de recursos"; break;
+                    case 10: cause = "Cierre solicitado por el usuario o el sistema"; break;
+                    case 12: cause = "Proceso asociado terminado"; break;
+                    case 14: cause = "Android detectó un cambio en el estado del paquete"; break;
+                    case 15: cause = "Android terminó un proceso congelado"; break;
+                    case 16: cause = "El paquete del juego fue actualizado"; break;
+                    default: cause = "Android no proporcionó un motivo concluyente";
                 }
                 if (cause != null) report.append(cause).append('\n');
             }
